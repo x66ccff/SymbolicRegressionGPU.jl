@@ -3,7 +3,7 @@
 
 SymbolicRegression.jl searches for symbolic expressions which optimize a particular objective.
 
-https://github.com/MilesCranmer/SymbolicRegression.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0
+<!-- https://github.com/MilesCranmer/SymbolicRegression.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0 -->
 
 | Latest release | Documentation | Forums | Paper |
 | :---: | :---: | :---: | :---: |

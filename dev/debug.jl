@@ -38,7 +38,7 @@ y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
 # y = 2 * cos.(X[4, :]).^3 + X[1, :] .^ 2 .- 2
 
 options = SymbolicRegression.Options(;
-    binary_operators=[+, *, /, -], unary_operators=[sin, cos, exp, log]
+    binary_operators=[+, *, /, -], unary_operators=[cos, exp]
 )
 
 hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)

@@ -879,8 +879,8 @@ function start_psrn_task(
         try
             # 1. Select the top 3 most common subtrees 
             @info "Starting subtree selection..."
-            # top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
-            top_subtrees = select_top_subtrees(common_subtrees, 10) # TODO - need to adjust this number in the future
+            top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
+            # top_subtrees = select_top_subtrees(common_subtrees, 10) # TODO - need to adjust this number in the future
             @info "Selected subtrees:" top_subtrees
 
             # 2. Computed mapping value
@@ -892,7 +892,8 @@ function start_psrn_task(
             @info "Initializing PSRN model..."
             psrn = PSRN(
                 n_variables = length(top_subtrees),
-                operators = ["Add", "Mul", "Div", "Sub", "Sin", "Cos", "Exp", "Log"], # TODO - add Identity operator
+                # operators = ["Add", "Mul", "Div", "Sub", "Identity", "Sin", "Cos", "Exp", "Log"], # "Operator identity not found in operators for expression type
+                operators = ["Add", "Mul", "Div", "Sub", "Sin", "Cos", "Exp", "Log"],
                 n_symbol_layers = 2, # TODO - only use 2 layers for debugging, and no DRmask
                 backend = get_preferred_backend(),
                 initial_expressions = top_subtrees

@@ -278,6 +278,7 @@ mutable struct PSRN
     n_symbol_layers::Int
     layers::Vector{SymbolLayer}
     current_exprs::Vector{Expression}
+    out_dim::Int
     backend::Any
     options::Options
     
@@ -330,9 +331,10 @@ mutable struct PSRN
         end
         
         operator_list = [OPERATORS[name] for name in operators]
+        out_dim = layers[end].out_dim
         
         new(n_variables, operator_list, n_symbol_layers, layers,
-            current_exprs, layers[end].out_dim, backend, options)
+            current_exprs, out_dim, backend, options)
     end
 end
 

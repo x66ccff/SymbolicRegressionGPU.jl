@@ -522,18 +522,17 @@ function to_device(x::AbstractArray, backend::Union{Module,KA.Backend})
 end
 
 function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=100)
-    # 确保y在正确的设备上
     backend = outputs isa CUDA.CuArray ? CUDA : CPU
     y_device = to_device(y, backend)
     
-    # 计算每个输出与目标值的MSE
+    # Calculate the MSE for each output with respect to the target value
     n_samples = size(outputs, 1)
     n_expressions = size(outputs, 2)
     
-    # 初始化误差累加器
+    # Initialize the error accumulator
     sum_squared_errors = CUDA.zeros(eltype(outputs), n_expressions)
     
-    # 计算每个表达式的MSE
+    # Calculate the MSE for each expression
     for i in 1:n_samples
         diff = outputs[i, :] .- y_device[i]
         sum_squared_errors .+= diff .^ 2
@@ -541,19 +540,19 @@ function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=
     mean_squared_errors = sum_squared_errors ./ n_samples
     @info "Mean squared errors before handling NaN/Inf" mean_squared_errors
     
-    # 将数据移回CPU进行处理
+    # Move the data back to the CPU for processing
     mean_squared_errors_cpu = Array(mean_squared_errors)
     
-    # 在CPU上处理无效值
+    # Handle invalid values on the CPU
     mean_squared_errors_cpu[isnan.(mean_squared_errors_cpu)] .= Inf32
     mean_squared_errors_cpu[isinf.(mean_squared_errors_cpu)] .= Inf32
     
     @info "Mean squared errors after handling NaN/Inf" mean_squared_errors_cpu
     
-    # 找到top_k个最小的MSE对应的索引
+    # Find the indices of the top_k smallest MSEs
     sorted_indices = partialsortperm(mean_squared_errors_cpu, 1:min(top_k, length(mean_squared_errors_cpu)))
     
-    # 返回索引和对应的MSE值
+    # Return the indices and corresponding MSE values
     return sorted_indices, mean_squared_errors_cpu[sorted_indices]
 end
 

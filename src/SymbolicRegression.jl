@@ -335,7 +335,6 @@ import .PSRNmodel: PSRN, forward, get_expr, get_best_expressions
     include("Configure.jl")
 end
 
-# 设备管理代码放在模块开始处
 using KernelAbstractions
 using CUDA
 @static if Base.find_package("Metal") !== nothing
@@ -358,7 +357,6 @@ end
 const AVAILABLE_BACKENDS = Dict{Symbol,Any}()
 
 function __init__()
-    # 检查并注册可用的计算后端
     if USE_CUDA
         AVAILABLE_BACKENDS[:cuda] = CUDABackend()
     end
@@ -923,20 +921,19 @@ function start_psrn_task(
     end
 end
 
-# 辅助函数
 function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int)
-    # 按照出现频率排序并选择前n个
+    # Sort by frequency and select the first n
     sorted_subtrees = sort(collect(common_subtrees), by=x->x[2], rev=true)
     
-    # 初始化结果数组
+    # Initializes the result array
     result = Node[]
     
-    # 添加可用的子树
+    # Add an available subtrees
     for i in 1:min(n, length(sorted_subtrees))
         push!(result, sorted_subtrees[i][1])
     end
     
-    # 如果数量不足n,用常数节点补充
+    # If the number is less than n, add constant nodes
     while length(result) < n
         push!(result, Node(1.0))
     end
@@ -945,43 +942,43 @@ function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int)
 end
 
 function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::AbstractOptions)
-    n_samples = size(dataset.X, 2)  # 使用列数作为样本数
+    n_samples = size(dataset.X, 2)  # Use the number of columns as the number of samples
     n_subtrees = length(subtrees)
     
-    # 创建结果矩阵 - 使用与dataset.X相同的类型
+    # Create a result matrix - using the same type as dataset.X
     T = eltype(dataset.X)
     result = zeros(T, n_samples, n_subtrees)
     
     @info "n_subtrees: $n_subtrees"
     @info "n_samples: $n_samples"
 
-    # 对每个子树求值
+    # Evaluate each subtree
     @info "here is start"
     for (i, subtree) in enumerate(subtrees)
         if isnothing(subtree)
             @info "here is nothing"
             result[:, i] .= one(T)
         else
-            # 创建Expression对象，提供必要的参数
-            @info "Evaluating subtree: $subtree"  # 先打印Node对象
+            # Creates an Expression object, providing the necessary parameters
+            @info "Evaluating subtree: $subtree"  # Print the Node object first
             
-            # 创建Expression时使用options中的operators
+            # Use operators in options when creating an Expression
             expr = Expression(
                 subtree,
-                operators=options.operators,  # 使用options中的operators
-                variable_names=dataset.variable_names  # 从dataset获取variable_names
+                operators=options.operators,  # Use operators in options
+                variable_names=dataset.variable_names  # Get variable_names from dataset
             )
             
-            # 在数据集X上求值
+            # Evaluate on data set X
             @info "Starting eval_tree_array..."
             output, success = eval_tree_array(
                 expr, 
-                dataset.X  # 直接使用X，不转置
+                dataset.X  # Just use X, no transpose
             )
             @info "eval_tree_array completed" success=success output_size=size(output)
             
             if success
-                # 如果output是一维的，直接赋值给对应的列
+                # If the output is one-dimensional, it is assigned directly to the corresponding column
                 if length(output) == n_samples
                     result[:, i] = output
                     @info "Successfully assigned output to result[:, $i]"
@@ -1000,7 +997,7 @@ function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::Ab
     return result
 end
 
-# 修改analyze_common_subtrees函数,使用Node而不是String
+# Modify the analyze_common_subtrees function to use Node (in SR.jl) instead of String
 function analyze_common_subtrees(trees::Vector{<:Expression})
     subtree_counts = Dict{Node, Int}()
     
@@ -1026,7 +1023,7 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
     return common_patterns
 end
 
-# 检查并处理PSRN结果
+# Check and process PSRN results
 function process_psrn_results!(
     manager::PSRNManager,
     hall_of_fame::HallOfFame,
@@ -1045,7 +1042,7 @@ function process_psrn_results!(
     end
 end
 
-# 获取一个表达式树的所有子树
+# Gets all the subtrees of an expression tree
 function get_subtrees(expr::Expression)
     if isnothing(expr.tree)
         return Node[]
@@ -1061,7 +1058,7 @@ function get_subtrees(node::Node)
     
     push!(subtrees, node)
     
-    # 递归处理左右子树
+    # Recursive processing of left and right subtrees
     if isdefined(node, :l) && !isnothing(node.l)
         append!(subtrees, get_subtrees(node.l))
     end
@@ -1073,7 +1070,6 @@ function get_subtrees(node::Node)
     return subtrees
 end
 
-# 对于常数和变量的处理
 get_subtrees(x::Number) = Node[]
 get_subtrees(x::Symbol) = Node[]
 
@@ -1104,10 +1100,8 @@ function _main_search_loop!(
     print_every_n_seconds = 5
     equation_speed = Float32[]
 
-    # 始化PSRN管理器
     psrn_manager = PSRNManager()
 
-    # 对于多进程或多线程模式,启动监听任务
     if ropt.parallelism in (:multiprocessing, :multithreading)
         for j in 1:nout, i in 1:(options.populations)
             # Start listening for each population to finish:

@@ -1,17 +1,12 @@
 module PSRNmodel
 
-# 1. 导入基础函数
 using ..PSRNfunctions
-# 尝试使用完整的导入路径
 import ..CoreModule.OperatorsModule: plus, sub, mult, square, cube, safe_pow, safe_log,
     safe_log2, safe_log10, safe_sqrt, safe_acosh, neg, greater,
     cond, relu, logical_or, logical_and, gamma
 
-import ..CoreModule: Options, Dataset  # 添加其他需要的类型
+import ..CoreModule: Options, Dataset 
 
-
-# 2. 只使用KernelAbstractions的抽象接口
-# 在文件顶部的导入部分添加
 using KernelAbstractions
 const KA = KernelAbstractions
 using CUDA
@@ -27,30 +22,25 @@ end
 end
 
 
-# 3. 其他导入
-using Printf: @sprintf  # 直接导入宏
+using Printf: @sprintf  
 using DynamicExpressions: Node, Expression
 
-
-# 基础操作符抽象类型
 abstract type Operator end
 
-# 操作符类型定义
 struct UnaryOperator <: Operator
     name::String
     kernel::Function
     is_directed::Bool
-    op::Function  # 实际的操作符函数
+    op::Function
 end
 
 struct BinaryOperator <: Operator
     name::String
     kernel::Function
     is_directed::Bool
-    op::Function  # 实际的操作符函数
+    op::Function
 end
 
-# 预定义所有支持的操作符
 const OPERATORS = Dict{String, Operator}(
     "Identity" => UnaryOperator("Identity", identity_kernel!, true, identity),
     "Sin" => UnaryOperator("Sin", sin_kernel!, true, sin),
@@ -66,11 +56,11 @@ const OPERATORS = Dict{String, Operator}(
     "Sqrt" => UnaryOperator("Sqrt", sqrt_kernel!, true, safe_sqrt)
 )
 
-# SymbolLayer结构
+# SymbolLayer
 mutable struct SymbolLayer
     in_dim::Int
     out_dim::Int
-    operators::Vector{Operator}  # 改用Operator而不是String
+    operators::Vector{Operator}  # use Operator in SR.jl instead of String
     n_binary_U::Int  # undirected (+ *)
     n_binary_D::Int  # directed (/ -)
     n_unary::Int
@@ -89,8 +79,8 @@ mutable struct SymbolLayer
         
         n_triu = (in_dim * (in_dim + 1)) ÷ 2
         in_dim_square = in_dim * in_dim
-        
-        # 计数所有操作符
+    
+        # count the numbers of operators
         for op in operators
             if op isa BinaryOperator
                 if op.is_directed
@@ -102,23 +92,23 @@ mutable struct SymbolLayer
                 n_unary += 1
             end
         end
-        
-        # 按顺序添加操作符：先无向二元，再有向二元，最后一元
-        # 1. 无向二元操作符
+
+        # Add operators in order: first undirected binary, then directed binary, and finally unary
+        # 1. Undirected binary operators
         for op in operators
             if op isa BinaryOperator && !op.is_directed
                 push!(operator_list, op)
             end
         end
         
-        # 2. 有向二元操作符
+        # 2. Directed binary operators
         for op in operators
             if op isa BinaryOperator && op.is_directed
                 push!(operator_list, op)
             end
         end
         
-        # 3. 一元操作符
+        # 3. Unary operators
         for op in operators
             if op isa UnaryOperator
                 push!(operator_list, op)
@@ -132,7 +122,7 @@ mutable struct SymbolLayer
     end
 end
 
-# 修改索引生成函数使用传入的backend
+# Modify Index Generation Function to Use Passed-in Backend
 function get_triu_indices(n::Int, backend)
     if backend isa KA.CPU
         indices = Tuple{Int,Int}[]
@@ -143,7 +133,7 @@ function get_triu_indices(n::Int, backend)
         end
         return indices
     else
-        # GPU版本返回两个向量
+        # return two vectors in GPU version
         row_idx = Int[]
         col_idx = Int[]
         for i in 1:n
@@ -152,7 +142,7 @@ function get_triu_indices(n::Int, backend)
                 push!(col_idx, j)
             end
         end
-        # 根据backend类型返回对应的数组
+        # Returns the corresponding array based on the backend type
         return (to_device(row_idx, backend), to_device(col_idx, backend))
     end
 end
@@ -169,11 +159,10 @@ function to_device(x::AbstractArray, backend)
 end
 
 
-# 为SymbolLayer添加获取作符和偏移量的方���
 function get_op_and_offset(layer::SymbolLayer, index::Int)
     out_dim_cum_ls = get_out_dim_cum_ls(layer)
     
-    # 找到对应的操作符
+    # Find the corresponding operator
     op_idx = 1
     for i in eachindex(out_dim_cum_ls)
         if index < out_dim_cum_ls[i]
@@ -182,20 +171,20 @@ function get_op_and_offset(layer::SymbolLayer, index::Int)
         end
     end
     
-    # 获取偏移量
+    # Get offset
     offset = layer.offset_tensor[index, :]
     return layer.operator_list[op_idx], offset
 end
 
-# 添加前向传播函数
+# Add a forward propagator
 function forward(layer::SymbolLayer, x::AbstractArray, backend)
     results = []
     
     for op in layer.operator_list
         if op isa UnaryOperator
-            # 获取输入数据的后端
+            # Back end to get input data
             device_backend = get_backend(x)
-            # 创建并执行 kernel
+            # Create and execute the kernel
             kernel = op.kernel(device_backend, 256)
             result = similar(x)
             event = kernel(result, x, ndrange=size(x))
@@ -205,7 +194,7 @@ function forward(layer::SymbolLayer, x::AbstractArray, backend)
             push!(results, result)
         else # BinaryOperator
             if op.is_directed
-                # 有向二元操作 (如除法、减法)
+                # Directed binary operation (division, subtraction)
                 device_backend = get_backend(x)
                 kernel = op.kernel(device_backend, 256)
                 
@@ -223,7 +212,7 @@ function forward(layer::SymbolLayer, x::AbstractArray, backend)
                         end
                     end
                 else
-                    # GPU版本：批量处理
+                    # GPU version: Batch processing
                     row_idx, col_idx = get_square_indices(layer.in_dim, device_backend)
                     x1 = view(x, :, row_idx)
                     x2 = view(x, :, col_idx)
@@ -235,7 +224,7 @@ function forward(layer::SymbolLayer, x::AbstractArray, backend)
                     push!(results, result)
                 end
             else
-                # 无向二元操作 (如加法、乘法)
+                # Undirected binary operation (e.g. addition, multiplication)
                 device_backend = get_backend(x)
                 kernel = op.kernel(device_backend, 256)
                 
@@ -253,7 +242,7 @@ function forward(layer::SymbolLayer, x::AbstractArray, backend)
                         end
                     end
                 else
-                    # GPU版本：批量处理
+                    # GPU version: Batch processing
                     row_idx, col_idx = get_triu_indices(layer.in_dim, device_backend)
                     x1 = view(x, :, row_idx)
                     x2 = view(x, :, col_idx)
@@ -271,7 +260,6 @@ function forward(layer::SymbolLayer, x::AbstractArray, backend)
     return hcat(results...)
 end
 
-# 添加 get_backend 函数
 function get_backend(x::AbstractArray)
     if x isa CuArray
         return CUDA.CUDABackend()
@@ -284,30 +272,28 @@ function get_backend(x::AbstractArray)
     end
 end
 
-# 修改PSRN结构
 mutable struct PSRN
     n_variables::Int
     operators::Vector{Operator}
     n_symbol_layers::Int
     layers::Vector{SymbolLayer}
-    current_exprs::Vector{Expression}  # 改用Expression而不是String
-    out_dim::Int
+    current_exprs::Vector{Expression}
     backend::Any
-    options::Options  # 添加Options用于构建表达式
+    options::Options
     
     function PSRN(;
         n_variables::Int=1,
         operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg", "Inv"],
         n_symbol_layers::Int=2,
         backend=KA.CPU(),
-        initial_expressions=nothing  # 移除类型标注，使其更灵活
+        initial_expressions=nothing
     )
-        # 设置更完整的Options
+
         options = Options(;
-            binary_operators=[+, -, *, /, ^],  # 添加更多二元操作符
-            unary_operators=[cos, exp, sin, log], # 添加更多一元操作符
-            populations=20,  # 可以设置种群大小
-            parsimony=0.0001  # 添加复杂度惩罚
+            binary_operators=[+, -, *, /, ^],
+            unary_operators=[cos, exp, sin, log], 
+            populations=20,
+            parsimony=0.0001 
         )
         
         layers = SymbolLayer[]
@@ -318,26 +304,26 @@ mutable struct PSRN
             push!(layers, layer)
         end
         
-        # 创建初始表达式
+        # Create initial expression
         variable_names = ["x$i" for i in 1:n_variables]
         
-        # 根据initial_expressions的类型来处理
+        # Process based on the type of initial_expressions
         current_exprs = if isnothing(initial_expressions)
-            # 默认使用变量表达式
+            # Variable expressions are used by default
             [Expression(
                 Node(Float32; feature=i);
                 operators=options.operators,
                 variable_names=variable_names
             ) for i in 1:n_variables]
         elseif initial_expressions isa Vector{Node}
-            # 如果是Node数组，转换为Expression数组
+            # If it is a Node array, convert it to an Expression array
             [Expression(
                 node;
                 operators=options.operators,
                 variable_names=variable_names
             ) for node in initial_expressions]
         elseif initial_expressions isa Vector{Expression}
-            # 如果已经是Expression数组，直接使用
+            # If it is already an Expression array, use it directly
             initial_expressions
         else
             throw(ArgumentError("initial_expressions must be Nothing, Vector{Node}, or Vector{Expression}"))
@@ -359,36 +345,35 @@ function _get_expr(psrn::PSRN, index::Int, layer_idx::Int)
     layer = psrn.layers[layer_idx]
     op, offsets = get_op_and_offset(layer, index)
     
-    # 获取子表达式
+    # Get subexpression
     expr1 = _get_expr(psrn, offsets[1], layer_idx-1)
-    T = eltype(expr1.tree)  # 获取表达式的类型
+    T = eltype(expr1.tree)  # Gets the type of the expression
     
     if op isa UnaryOperator
-        # 创建一元操作表达式
+        # Create a unary operation expression
         return op.op(expr1)
     else
-        # 创建二元操作表达式
+        # Create a binary operation expression
         expr2 = _get_expr(psrn, offsets[2], layer_idx-1)
         return op.op(expr1, expr2)
     end
 end
 
-# 修改 get_expr 方法
 function get_expr(psrn::PSRN, index::Int)
     return _get_expr(psrn, index, length(psrn.layers))
 end
 
-# 添加PSRN的前向传播函数
+# Add a forward propagation function for PSRN
 function forward(psrn::PSRN, x::AbstractArray{T}) where T
-    # 检查输入维度
+    # Check input dimension
     size(x, 2) == psrn.n_variables || throw(DimensionMismatch(
         "Input should have $(psrn.n_variables) features, got $(size(x, 2))"
     ))
     
-    # 确保数据在正确的设备上
+    # Make sure the data is on the correct device
     x_device = to_device(x, psrn.backend)
     
-    # 前向传播
+    # Forward propagation
     h = x_device
     for layer in psrn.layers
         h = forward(layer, h, psrn.backend)
@@ -396,7 +381,6 @@ function forward(psrn::PSRN, x::AbstractArray{T}) where T
     return h
 end
 
-# 需要添加get_out_dim_cum_ls方法(类似Python版本)
 function get_out_dim_cum_ls(layer::SymbolLayer)
     if layer.out_dim_cum_ls !== nothing
         return layer.out_dim_cum_ls
@@ -421,12 +405,10 @@ function get_out_dim_cum_ls(layer::SymbolLayer)
     return layer.out_dim_cum_ls
 end
 
-# 需要添加init_offset方法
 function init_offset(layer::SymbolLayer, backend)
     layer.offset_tensor = get_offset_tensor(layer, backend)
 end
 
-# 需要添加get_offset_tensor方法
 function get_offset_tensor(layer::SymbolLayer, backend)
     offset_tensor = zeros(Int, layer.out_dim, 2)
     arange_tensor = collect(1:layer.in_dim)
@@ -438,7 +420,7 @@ function get_offset_tensor(layer::SymbolLayer, backend)
     unary_tensor[:, 1] = arange_tensor
     unary_tensor[:, 2] .= layer.in_dim
     
-    # 填充binary_U_tensor(无向二元操作的索引)
+    # Fill binary_U_tensor(index of undirected binary operation)
     start = 1
     for i in 1:layer.in_dim
         len = layer.in_dim - i + 1
@@ -447,7 +429,7 @@ function get_offset_tensor(layer::SymbolLayer, backend)
         start += len
     end
     
-    # 填充binary_D_tensor(有向二元操作的索引)
+    # Fill binary_D_tensor(index of directed binary operation)
     start = 1
     for i in 1:layer.in_dim
         len = layer.in_dim
@@ -456,7 +438,7 @@ function get_offset_tensor(layer::SymbolLayer, backend)
         start += len
     end
     
-    # 组合所有索引
+    # Combine all indexes
     start = 1
     for func in layer.operator_list
         if func isa UnaryOperator
@@ -472,7 +454,7 @@ function get_offset_tensor(layer::SymbolLayer, backend)
     return offset_tensor
 end
 
-# 添加打印方法
+# Add print method
 function Base.show(io::IO, psrn::PSRN)
     print(io, "PSRN(n_variables=$(psrn.n_variables), operators=$(psrn.operators), " *
               "n_layers=$(psrn.n_symbol_layers))\n")
@@ -481,13 +463,13 @@ function Base.show(io::IO, psrn::PSRN)
 end
 
 function to_device(psrn::PSRN, backend)
-    # 创建新的PSRN实例并更新backend
+    # Create a new PSRN instance and update backend
     new_psrn = PSRN(
         n_variables=psrn.n_variables,
         operators=[op.name for op in psrn.operators],
         n_symbol_layers=psrn.n_symbol_layers,
         backend=backend,
-        initial_expressions=psrn.current_exprs  # 传递当前表达式
+        initial_expressions=psrn.current_exprs  # Pass the current base expression from hall of fame
     )
     return new_psrn
 end
@@ -502,7 +484,7 @@ function get_square_indices(n::Int, backend)
         end
         return indices
     else
-        # GPU版本返回两个向量
+        # The GPU version returns two vectors
         row_idx = Int[]
         col_idx = Int[]
         for i in 1:n
@@ -515,7 +497,6 @@ function get_square_indices(n::Int, backend)
     end
 end
 
-# 修改 get_preferred_backend 函数
 function get_preferred_backend()
     if CUDA.functional()
         return CUDA.CUDABackend()
@@ -527,7 +508,6 @@ function get_preferred_backend()
     return KernelAbstractions.CPU()
 end
 
-# 修改 to_device 函数
 function to_device(x::AbstractArray, backend::Union{Module,KA.Backend})
     if backend isa KA.GPU
         if CUDA.functional()
@@ -541,7 +521,6 @@ function to_device(x::AbstractArray, backend::Union{Module,KA.Backend})
     return Array(x)
 end
 
-# 添加find_best_indices函数
 function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=100)
     # 确保y在正确的设备上
     backend = outputs isa CUDA.CuArray ? CUDA : CPU
@@ -578,22 +557,16 @@ function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=
     return sorted_indices, mean_squared_errors_cpu[sorted_indices]
 end
 
-# 添加get_best_expressions函数
 function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray; top_k::Int=100)
-    # 确保X和y在正确的设备上
     backend = get_preferred_backend()
     X_device = to_device(X, backend)
     
-    # 前向传播获取所有输出
     outputs = forward(psrn, X_device)
     
-    # 找到最佳的索引
     best_indices, mse_values = find_best_indices(outputs, y; top_k=top_k)
     
-    # 获取对应的表达式
     best_expressions = [get_expr(psrn, idx) for idx in best_indices]
     
-    # 打印结果
     println("Best expressions:")
     println("-"^20)
     for (expr, mse) in zip(best_expressions, mse_values)

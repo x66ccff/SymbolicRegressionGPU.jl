@@ -3,7 +3,7 @@ module PSRNfunctions
 using KernelAbstractions
 const KA = KernelAbstractions
 
-# 一元操作符 kernels
+# unary operator kernels
 @kernel function identity_kernel!(out, x)
     I = @index(Global)
     @inbounds out[I] = x[I]
@@ -39,7 +39,7 @@ end
     @inbounds out[I] = log(abs(x[I]))
 end
 
-# 二元操作符 kernels
+# binary operator kernels
 @kernel function add_kernel!(out, x1, x2)
     I = @index(Global)
     @inbounds out[I] = x1[I] + x2[I]
@@ -60,27 +60,25 @@ end
     @inbounds out[I] = x1[I] - x2[I]
 end
 
-# 添加 pow_kernel! 实现
 @kernel function pow_kernel!(out, x1, x2)
     I = @index(Global)
     @inbounds out[I] = x1[I] ^ x2[I]
 end
 
-# 添加 sqrt_kernel! 实现
 @kernel function sqrt_kernel!(out, x)
     I = @index(Global)
     @inbounds out[I] = sqrt(x[I])
 end
 
-# 执行函数
+# execution functions
 function execute_unary_op(kernel!, x, backend)
-    # 根据后端选择合适的工作组大小
+    # select appropriate workgroup size based on backend
     workgroup_size = backend isa KA.CPU ? 64 : 256
     
-    # 创建输出数组
+    # create output array
     out = similar(x)
     
-    # 创建并执行kernel
+    # create and execute kernel
     kernel = kernel!(backend, workgroup_size)
     event = kernel(out, x, ndrange=size(x))
     wait(event)
@@ -89,13 +87,13 @@ function execute_unary_op(kernel!, x, backend)
 end
 
 function execute_binary_op(kernel!, x1, x2, backend)
-    # 根据后端选择合适的工作组大小
+    # select appropriate workgroup size based on backend
     workgroup_size = backend isa KA.CPU ? 64 : 256
     
-    # 创建输出数组
+    # create output array
     out = similar(x1)
     
-    # 创建并执行kernel
+    # create and execute kernel
     kernel = kernel!(backend, workgroup_size)
     event = kernel(out, x1, x2, ndrange=size(x1))
     wait(event)
@@ -103,7 +101,7 @@ function execute_binary_op(kernel!, x1, x2, backend)
     return out
 end
 
-# 导出所有kernel和执行函数
+# export all kernels and execution functions
 export identity_kernel!, add_kernel!, mul_kernel!, div_kernel!, sub_kernel!,
        neg_kernel!, inv_kernel!, sin_kernel!, cos_kernel!, exp_kernel!,
        log_kernel!, pow_kernel!, sqrt_kernel!, execute_unary_op, execute_binary_op

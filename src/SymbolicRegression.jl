@@ -862,6 +862,7 @@ function start_psrn_task(
     manager.call_count += 1
     
     # Check if PSRN needs to be executed
+    # TODO - This is obviously not efficient, but it works for now
     if manager.call_count % 10 != 0  # This command is executed every 10 times
         return
     end
@@ -878,20 +879,21 @@ function start_psrn_task(
         try
             # 1. Select the top 3 most common subtrees 
             @info "Starting subtree selection..."
-            top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - why 3 will pass and 10 will fail???
+            # top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
+            top_subtrees = select_top_subtrees(common_subtrees, 10) # TODO - need to adjust this number in the future
             @info "Selected subtrees:" top_subtrees
 
             # 2. Computed mapping value
-            @info "Computing mapping values..."
+            # @info "Computing mapping values..."
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-            @info "Computed mapping values:" size(X_mapped) typeof(X_mapped)
+            # @info "Computed mapping values:" size(X_mapped) typeof(X_mapped)
 
             # 3. Initialize the PSRN
             @info "Initializing PSRN model..."
             psrn = PSRN(
                 n_variables = length(top_subtrees),
                 operators = ["Add", "Mul", "Div", "Sub", "Sin", "Cos", "Exp", "Log"], # TODO - add Identity operator
-                n_symbol_layers = 2, # only use 2 layers for debugging, and no DRmask
+                n_symbol_layers = 2, # TODO - only use 2 layers for debugging, and no DRmask
                 backend = get_preferred_backend(),
                 initial_expressions = top_subtrees
             )
@@ -928,14 +930,15 @@ function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int)
     # Initializes the result array
     result = Node[]
     
-    # Add an available subtrees
+    # Add available subtrees
     for i in 1:min(n, length(sorted_subtrees))
         push!(result, sorted_subtrees[i][1])
     end
     
     # If the number is less than n, add constant nodes
     while length(result) < n
-        push!(result, Node(1.0))
+        # 使用正确的Node构造函数创建常量节点
+        push!(result, Node(; val=Float32(1.0)))  # 使用命名参数构造函数
     end
     
     return result
@@ -949,18 +952,16 @@ function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::Ab
     T = eltype(dataset.X)
     result = zeros(T, n_samples, n_subtrees)
     
-    @info "n_subtrees: $n_subtrees"
-    @info "n_samples: $n_samples"
+    # @info "n_subtrees: $n_subtrees"
+    # @info "n_samples: $n_samples"
 
     # Evaluate each subtree
-    @info "here is start"
     for (i, subtree) in enumerate(subtrees)
         if isnothing(subtree)
-            @info "here is nothing"
             result[:, i] .= one(T)
         else
             # Creates an Expression object, providing the necessary parameters
-            @info "Evaluating subtree: $subtree"  # Print the Node object first
+            # @info "Evaluating subtree: $subtree"  # Print the Node object first
             
             # Use operators in options when creating an Expression
             expr = Expression(
@@ -970,18 +971,18 @@ function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::Ab
             )
             
             # Evaluate on data set X
-            @info "Starting eval_tree_array..."
+            # @info "Starting eval_tree_array..."
             output, success = eval_tree_array(
                 expr, 
                 dataset.X  # Just use X, no transpose
             )
-            @info "eval_tree_array completed" success=success output_size=size(output)
+            # @info "eval_tree_array completed" success=success output_size=size(output)
             
             if success
                 # If the output is one-dimensional, it is assigned directly to the corresponding column
                 if length(output) == n_samples
                     result[:, i] = output
-                    @info "Successfully assigned output to result[:, $i]"
+                    # @info "Successfully assigned output to result[:, $i]"
                 else
                     @warn "Dimension mismatch: output length $(length(output)) doesn't match expected size ($n_samples). Using ones."
                     result[:, i] .= one(T)
@@ -997,8 +998,9 @@ function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::Ab
     return result
 end
 
-# Modify the analyze_common_subtrees function to use Node (in SR.jl) instead of String
 function analyze_common_subtrees(trees::Vector{<:Expression})
+    # TODO - This is obviously not efficient, but it works for now
+
     subtree_counts = Dict{Node, Int}()
     
     for tree in trees
@@ -1010,7 +1012,7 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
         end
     end
     
-    threshold = length(trees) * 0.3
+    threshold = length(trees) * 0.1 # TODO need to adjust this threshold in tghe future
     common_patterns = filter(p -> p.second >= threshold, subtree_counts)
     
     if !isempty(common_patterns)
@@ -1035,6 +1037,8 @@ function process_psrn_results!(
         if !isempty(new_expressions)
             for expr in new_expressions
                 member = PopMember(dataset, expr, options; deterministic=false)
+                # @info "PSRN member: $member"
+                # @info "type of member: $(typeof(member))"
                 update_hall_of_fame!(hall_of_fame, [member], options)
             end
             @info "Added PSRN results to hall of fame"
@@ -1260,19 +1264,19 @@ function _main_search_loop!(
             state.cur_maxsizes[j] = get_cur_maxsize(;
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
-            move_window!(state.all_running_search_statistics[j])
-            if !isnothing(progress_bar)
-                head_node_occupation = estimate_work_fraction(resource_monitor)
-                update_progress_bar!(
-                    progress_bar,
-                    only(state.halls_of_fame),
-                    only(datasets),
-                    options,
-                    equation_speed,
-                    head_node_occupation,
-                    ropt.parallelism,
-                )
-            end
+            # move_window!(state.all_running_search_statistics[j])
+            # if !isnothing(progress_bar)
+            #     head_node_occupation = estimate_work_fraction(resource_monitor)
+            #     update_progress_bar!(
+            #         progress_bar,
+            #         only(state.halls_of_fame),
+            #         only(datasets),
+            #         options,
+            #         equation_speed,
+            #         head_node_occupation,
+            #         ropt.parallelism,
+            #     )
+            # end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end

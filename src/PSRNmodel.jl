@@ -540,7 +540,7 @@ function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=
         sum_squared_errors .+= diff .^ 2
     end
     mean_squared_errors = sum_squared_errors ./ n_samples
-    @info "Mean squared errors before handling NaN/Inf" mean_squared_errors
+    # @info "Mean squared errors before handling NaN/Inf" mean_squared_errors
     
     # Move the data back to the CPU for processing
     mean_squared_errors_cpu = Array(mean_squared_errors)
@@ -549,7 +549,7 @@ function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=
     mean_squared_errors_cpu[isnan.(mean_squared_errors_cpu)] .= Inf32
     mean_squared_errors_cpu[isinf.(mean_squared_errors_cpu)] .= Inf32
     
-    @info "Mean squared errors after handling NaN/Inf" mean_squared_errors_cpu
+    # @info "Mean squared errors after handling NaN/Inf" mean_squared_errors_cpu
     
     # Find the indices of the top_k smallest MSEs
     sorted_indices = partialsortperm(mean_squared_errors_cpu, 1:min(top_k, length(mean_squared_errors_cpu)))
@@ -568,12 +568,12 @@ function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray; to
     
     best_expressions = [get_expr(psrn, idx) for idx in best_indices]
     
-    println("Best expressions:")
-    println("-"^20)
+    # println("Best expressions:")
+    # println("-"^20)
     for (expr, mse) in zip(best_expressions, mse_values)
-        println("MSE: ", mse, " | Expression: ", expr)
+        # println("MSE: ", mse, " | Expression: ", expr)
     end
-    println("-"^20)
+    # println("-"^20)
     
     return best_expressions, mse_values
 end

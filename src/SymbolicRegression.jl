@@ -80,7 +80,11 @@ export Population,
     gamma,
     erf,
     erfc,
-    atanh_clip
+    atanh_clip,
+
+    PSRNManager,
+    start_psrn_task,
+    process_psrn_results!
 
 using Distributed
 using Printf: @printf, @sprintf
@@ -159,6 +163,8 @@ using DynamicExpressions: with_type_parameters
     QuantileLoss,
     LogCoshLoss
 using Compat: @compat, Fix
+using CUDA
+using KernelAbstractions
 
 #! format: off
 @compat(
@@ -218,6 +224,8 @@ using DispatchDoctor: @stable
     include("ComposableExpression.jl")
     include("TemplateExpression.jl")
     include("ParametricExpression.jl")
+    include("PSRNfunctions.jl")
+    include("PSRNmodel.jl")
 end
 
 using .CoreModule:
@@ -318,9 +326,61 @@ using .TemplateExpressionModule: TemplateExpression, TemplateStructure, ValidVec
 using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
+import .PSRNmodel: PSRN, forward, get_expr, get_best_expressions
+
+
+
 @stable default_mode = "disable" begin
     include("deprecates.jl")
     include("Configure.jl")
+end
+
+# 设备管理代码放在模块开始处
+using KernelAbstractions
+using CUDA
+@static if Base.find_package("Metal") !== nothing
+    using Metal
+end
+@static if Base.find_package("AMDGPU") !== nothing
+    using AMDGPU
+end
+@static if Base.find_package("oneAPI") !== nothing
+    using oneAPI
+end
+
+const USE_CUDA = try
+    using CUDA
+    CUDA.functional()
+catch
+    false
+end
+
+const AVAILABLE_BACKENDS = Dict{Symbol,Any}()
+
+function __init__()
+    # 检查并注册可用的计算后端
+    if USE_CUDA
+        AVAILABLE_BACKENDS[:cuda] = CUDABackend()
+    end
+    if @isdefined(Metal) && Metal.functional()
+        AVAILABLE_BACKENDS[:metal] = MetalBackend()
+    end
+    if @isdefined(AMDGPU) && AMDGPU.functional()
+        AVAILABLE_BACKENDS[:rocm] = ROCBackend()
+    end
+    if @isdefined(oneAPI) && oneAPI.functional()
+        AVAILABLE_BACKENDS[:oneapi] = oneBackend()
+    end
+    AVAILABLE_BACKENDS[:cpu] = CPU()
+end
+
+function get_preferred_backend()
+    for backend in [:cuda, :metal, :rocm, :oneapi, :cpu]
+        if haskey(AVAILABLE_BACKENDS, backend)
+            return AVAILABLE_BACKENDS[backend]
+        end
+    end
+    return AVAILABLE_BACKENDS[:cpu]
 end
 
 """
@@ -784,6 +844,240 @@ function _warmup_search!(
     end
     return nothing
 end
+
+# Add the PSRN task manager structure
+mutable struct PSRNManager
+    channel::Channel{Vector{Expression}}  # Channel for receiving PSRN results
+    current_task::Union{Task,Nothing}     # Currently running PSRN task
+    call_count::Int                       # PSRN call counter
+    
+    PSRNManager() = new(Channel{Vector{Expression}}(32), nothing, 0)
+end
+
+function start_psrn_task(
+    manager::PSRNManager,
+    common_subtrees::Dict{Node,Int}, 
+    dominating_trees::Vector{<:Expression},
+    dataset::Dataset,
+    options::AbstractOptions
+)
+    manager.call_count += 1
+    
+    # Check if PSRN needs to be executed
+    if manager.call_count % 10 != 0  # This command is executed every 10 times
+        return
+    end
+    
+    # If an existing task is running, do not start a new task
+    if manager.current_task !== nothing && !istaskdone(manager.current_task)
+        return
+    end
+    
+    @info "Starting PSRN computation ($(manager.call_count ÷ 10)/10 times)"
+    
+    # Start a new asynchronous task
+    manager.current_task = @async begin
+        try
+            # 1. Select the top 3 most common subtrees 
+            @info "Starting subtree selection..."
+            top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - why 3 will pass and 10 will fail???
+            @info "Selected subtrees:" top_subtrees
+
+            # 2. Computed mapping value
+            @info "Computing mapping values..."
+            X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
+            @info "Computed mapping values:" size(X_mapped) typeof(X_mapped)
+
+            # 3. Initialize the PSRN
+            @info "Initializing PSRN model..."
+            psrn = PSRN(
+                n_variables = length(top_subtrees),
+                operators = ["Add", "Mul", "Div", "Sub", "Sin", "Cos", "Exp", "Log"], # TODO - add Identity operator
+                n_symbol_layers = 2, # only use 2 layers for debugging, and no DRmask
+                backend = get_preferred_backend(),
+                initial_expressions = top_subtrees
+            )
+            @info "PSRN model initialization complete" psrn
+
+            @info "Finding best expressions..."
+
+            # function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray; top_k::Int=100)
+            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, dataset.y, top_k=100)
+            @info "Found best expressions" length(best_expressions)
+            @info "MSE values:" mse_values
+            @info "Best expressions:" best_expressions
+
+            put!(manager.channel, best_expressions)
+
+        catch e
+            bt = stacktrace(catch_backtrace())
+            @error """
+            PSRN task execution error:
+            Error type: $(typeof(e))
+            Error message: $e
+            Error location: $(bt[1])
+            Full stack:
+            $(join(string.(bt), "\n"))
+            """
+        end
+    end
+end
+
+# 辅助函数
+function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int)
+    # 按照出现频率排序并选择前n个
+    sorted_subtrees = sort(collect(common_subtrees), by=x->x[2], rev=true)
+    
+    # 初始化结果数组
+    result = Node[]
+    
+    # 添加可用的子树
+    for i in 1:min(n, length(sorted_subtrees))
+        push!(result, sorted_subtrees[i][1])
+    end
+    
+    # 如果数量不足n,用常数节点补充
+    while length(result) < n
+        push!(result, Node(1.0))
+    end
+    
+    return result
+end
+
+function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::AbstractOptions)
+    n_samples = size(dataset.X, 2)  # 使用列数作为样本数
+    n_subtrees = length(subtrees)
+    
+    # 创建结果矩阵 - 使用与dataset.X相同的类型
+    T = eltype(dataset.X)
+    result = zeros(T, n_samples, n_subtrees)
+    
+    @info "n_subtrees: $n_subtrees"
+    @info "n_samples: $n_samples"
+
+    # 对每个子树求值
+    @info "here is start"
+    for (i, subtree) in enumerate(subtrees)
+        if isnothing(subtree)
+            @info "here is nothing"
+            result[:, i] .= one(T)
+        else
+            # 创建Expression对象，提供必要的参数
+            @info "Evaluating subtree: $subtree"  # 先打印Node对象
+            
+            # 创建Expression时使用options中的operators
+            expr = Expression(
+                subtree,
+                operators=options.operators,  # 使用options中的operators
+                variable_names=dataset.variable_names  # 从dataset获取variable_names
+            )
+            
+            # 在数据集X上求值
+            @info "Starting eval_tree_array..."
+            output, success = eval_tree_array(
+                expr, 
+                dataset.X  # 直接使用X，不转置
+            )
+            @info "eval_tree_array completed" success=success output_size=size(output)
+            
+            if success
+                # 如果output是一维的，直接赋值给对应的列
+                if length(output) == n_samples
+                    result[:, i] = output
+                    @info "Successfully assigned output to result[:, $i]"
+                else
+                    @warn "Dimension mismatch: output length $(length(output)) doesn't match expected size ($n_samples). Using ones."
+                    result[:, i] .= one(T)
+                end
+            else
+                result[:, i] .= one(T)
+                @warn "eval_tree_array failed for subtree $i, using ones"
+            end
+        end
+    end
+    
+    @info "Evaluation complete" result_size=size(result)
+    return result
+end
+
+# 修改analyze_common_subtrees函数,使用Node而不是String
+function analyze_common_subtrees(trees::Vector{<:Expression})
+    subtree_counts = Dict{Node, Int}()
+    
+    for tree in trees
+        if !isnothing(tree.tree)
+            subtrees = get_subtrees(tree)
+            for subtree in subtrees
+                subtree_counts[subtree] = get(subtree_counts, subtree, 0) + 1
+            end
+        end
+    end
+    
+    threshold = length(trees) * 0.3
+    common_patterns = filter(p -> p.second >= threshold, subtree_counts)
+    
+    if !isempty(common_patterns)
+        println("\nCommon subtree patterns:")
+        for (pattern, count) in common_patterns
+            println("- $(string_tree(pattern)) (appeared $count times)")
+        end
+    end
+    
+    return common_patterns
+end
+
+# 检查并处理PSRN结果
+function process_psrn_results!(
+    manager::PSRNManager,
+    hall_of_fame::HallOfFame,
+    dataset::Dataset,
+    options::AbstractOptions
+)
+    while isready(manager.channel)
+        new_expressions = take!(manager.channel)
+        if !isempty(new_expressions)
+            for expr in new_expressions
+                member = PopMember(dataset, expr, options; deterministic=false)
+                update_hall_of_fame!(hall_of_fame, [member], options)
+            end
+            @info "Added PSRN results to hall of fame"
+        end
+    end
+end
+
+# 获取一个表达式树的所有子树
+function get_subtrees(expr::Expression)
+    if isnothing(expr.tree)
+        return Node[]
+    end
+    return get_subtrees(expr.tree)
+end
+
+function get_subtrees(node::Node)
+    subtrees = Node[]
+    if isnothing(node)
+        return subtrees
+    end
+    
+    push!(subtrees, node)
+    
+    # 递归处理左右子树
+    if isdefined(node, :l) && !isnothing(node.l)
+        append!(subtrees, get_subtrees(node.l))
+    end
+    
+    if isdefined(node, :r) && !isnothing(node.r)
+        append!(subtrees, get_subtrees(node.r))
+    end
+    
+    return subtrees
+end
+
+# 对于常数和变量的处理
+get_subtrees(x::Number) = Node[]
+get_subtrees(x::Symbol) = Node[]
+
+
 function _main_search_loop!(
     state::AbstractSearchState{T,L,N},
     datasets,
@@ -810,6 +1104,10 @@ function _main_search_loop!(
     print_every_n_seconds = 5
     equation_speed = Float32[]
 
+    # 始化PSRN管理器
+    psrn_manager = PSRNManager()
+
+    # 对于多进程或多线程模式,启动监听任务
     if ropt.parallelism in (:multiprocessing, :multithreading)
         for j in 1:nout, i in 1:(options.populations)
             # Start listening for each population to finish:
@@ -882,6 +1180,26 @@ function _main_search_loop!(
 
             # Dominating pareto curve - must be better than all simpler equations
             dominating = calculate_pareto_frontier(state.halls_of_fame[j])
+            
+            # println("dominating: ", dominating)
+            # Parse trees in dominating solutions
+            dominating_trees = [member.tree for member in dominating]
+            # println("Extracted trees: ", dominating_trees)
+
+            # println("Analyzing common subtrees...")
+            common_patterns = analyze_common_subtrees(dominating_trees)
+            # println("Number of common subtrees found: ", length(common_patterns))
+
+            # asynchronous calls PSRN
+            start_psrn_task(psrn_manager, common_patterns, dominating_trees, dataset, options)
+            
+            # process any completed PSRN results
+            process_psrn_results!(
+                psrn_manager,
+                state.halls_of_fame[j],
+                dataset,
+                options
+            )
 
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)

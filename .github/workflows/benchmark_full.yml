@@ -1,0 +1,46 @@
+name: Performance Comparison
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0  # 获取完整历史
+          
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v1
+        
+      - name: Run benchmarks on your fork
+        run: |
+          julia --project -e '
+            using Pkg
+            Pkg.add(["BenchmarkTools", "SymbolicRegression"])
+            include("benchmark/run_benchmarks.jl")
+          '
+        
+      - name: Checkout original repo
+        uses: actions/checkout@v2
+        with:
+          repository: MilesCranmer/SymbolicRegression.jl
+          path: original
+          
+      - name: Run benchmarks on original
+        run: |
+          cd original
+          julia --project -e '
+            using Pkg
+            Pkg.add(["BenchmarkTools", "SymbolicRegression"]) 
+            include("benchmark/run_benchmarks.jl")
+          '
+          
+      - name: Compare results
+        run: |
+          julia --project -e '
+            # 对比两次基准测试的结果
+            # 可以输出性能差异百分比
+          '

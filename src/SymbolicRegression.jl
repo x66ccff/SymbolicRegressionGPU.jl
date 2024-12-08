@@ -881,6 +881,7 @@ function start_psrn_task(
             # @info "Starting subtree selection..."
             # top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
             top_subtrees = select_top_subtrees(common_subtrees, 10) # TODO - need to adjust this number in the future
+            # top_subtrees = select_top_subtrees(common_subtrees, 20) # TODO - need to adjust this number in the future
             # @info "Selected subtrees:" top_subtrees
 
             # 2. Computed mapping value
@@ -1013,16 +1014,16 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
         end
     end
     
-    threshold = length(trees) * 0.1 # TODO need to adjust this threshold in tghe future
+    threshold = length(trees) * 0.01 # TODO need to adjust this threshold in tghe future
     common_patterns = filter(p -> p.second >= threshold, subtree_counts)
     
-    # if !isempty(common_patterns)
-    #     println("\nCommon subtree patterns:")
-    #     for (pattern, count) in common_patterns
-    #         # println("- $(string_tree(pattern)) (appeared $count times)")
-    #         @info pattern
-    #     end
-    # end
+    if !isempty(common_patterns)
+        # println("\nCommon subtree patterns:")
+        for (pattern, count) in common_patterns
+            # println("- $(string_tree(pattern)) (appeared $count times)")
+            # @info pattern
+        end
+    end
     
     return common_patterns
 end
@@ -1193,7 +1194,7 @@ function _main_search_loop!(
             dominating_trees = [member.tree for member in dominating]
             # println("Extracted trees: ", dominating_trees)
 
-            if true
+            if true # if use PSRN
                 # println("Analyzing common subtrees...")
                 common_patterns = analyze_common_subtrees(dominating_trees)
                 # println("Number of common subtrees found: ", length(common_patterns))

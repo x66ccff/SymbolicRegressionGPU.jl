@@ -1,46 +1,55 @@
 name: Performance Comparison
 
 on:
-  pull_request:
-    branches: [ master ]
+  pull_request_target:
+    branches:
+      - master
+
+permissions:
+  pull-requests: write
 
 jobs:
   benchmark:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
         with:
-          fetch-depth: 0  # 获取完整历史
-          
-      - name: Set up Julia
-        uses: julia-actions/setup-julia@v1
-        
-      - name: Run benchmarks on your fork
+          version: "1"
+      - uses: julia-actions/cache@v2
+      
+      - name: Install AirspeedVelocity
         run: |
-          julia --project -e '
-            using Pkg
-            Pkg.add(["BenchmarkTools", "SymbolicRegression"])
-            include("benchmark/run_benchmarks.jl")
-          '
-        
-      - name: Checkout original repo
-        uses: actions/checkout@v2
+          julia -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.add(url="https://github.com/MilesCranmer/AirspeedVelocity.jl.git")'
+          julia -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.build("AirspeedVelocity")'
+      
+      - name: Add Julia bin to PATH
+        run: echo "$HOME/.julia/bin" >> $GITHUB_PATH
+      
+      - name: Run benchmarks
+        run: |
+          mkdir results
+          benchpkg SymbolicRegression --rev="MilesCranmer/SymbolicRegression.jl#master,${{github.event.pull_request.head.sha}}" --url=${{ github.event.repository.clone_url }} --bench-on="${{github.event.pull_request.head.sha}}" --output-dir=results/ --exeflags="-O3 --threads=auto"
+      
+      - name: Generate comparison table
+        run: |
+          benchpkgtable SymbolicRegression --rev="MilesCranmer/SymbolicRegression.jl#master,${{github.event.pull_request.head.sha}}" --input-dir=results/ --ratio > table.md
+          echo '### Performance Comparison vs MilesCranmer/SymbolicRegression.jl' > body.md
+          echo '' >> body.md
+          cat table.md >> body.md
+      
+      - name: Find Comment
+        uses: peter-evans/find-comment@v3
+        id: fc
         with:
-          repository: MilesCranmer/SymbolicRegression.jl
-          path: original
-          
-      - name: Run benchmarks on original
-        run: |
-          cd original
-          julia --project -e '
-            using Pkg
-            Pkg.add(["BenchmarkTools", "SymbolicRegression"]) 
-            include("benchmark/run_benchmarks.jl")
-          '
-          
-      - name: Compare results
-        run: |
-          julia --project -e '
-            # 对比两次基准测试的结果
-            # 可以输出性能差异百分比
-          '
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: Performance Comparison
+
+      - name: Comment PR
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: body.md
+          edit-mode: replace

@@ -1193,7 +1193,7 @@ function _main_search_loop!(
             dominating_trees = [member.tree for member in dominating]
             # println("Extracted trees: ", dominating_trees)
 
-            if false
+            if true
                 # println("Analyzing common subtrees...")
                 common_patterns = analyze_common_subtrees(dominating_trees)
                 # println("Number of common subtrees found: ", length(common_patterns))

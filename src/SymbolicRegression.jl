@@ -135,6 +135,8 @@ using DynamicExpressions:
     with_contents,
     with_metadata
 using DynamicExpressions: with_type_parameters
+# TODO: Reexport D once DynamicAutodiff is registered
+# @reexport using DynamicAutodiff: D
 @reexport using LossFunctions:
     MarginLoss,
     DistanceLoss,

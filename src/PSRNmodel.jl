@@ -287,15 +287,16 @@ mutable struct PSRN
         operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg", "Inv"],
         n_symbol_layers::Int=2,
         backend=KA.CPU(),
-        initial_expressions=nothing
+        initial_expressions=nothing,
+        options=nothing
     )
 
-        options = Options(;
-            binary_operators=[+, -, *, /, ^],
-            unary_operators=[cos, exp, sin, log], 
-            populations=20,
-            parsimony=0.0001 
-        )
+        # options = Options(;
+        #     binary_operators=[+, -, *, /, ^],
+        #     unary_operators=[cos, exp, sin, log],  # kkTODO
+        #     populations=20,
+        #     parsimony=0.0001 
+        # )
         
         layers = SymbolLayer[]
         for i in 1:n_symbol_layers
@@ -353,6 +354,9 @@ function _get_expr(psrn::PSRN, index::Int, layer_idx::Int)
     
     if op isa UnaryOperator
         # Create a unary operation expression
+        if op.name == "Identity"
+            return expr1
+        end
         return op.op(expr1)
     else
         # Create a binary operation expression

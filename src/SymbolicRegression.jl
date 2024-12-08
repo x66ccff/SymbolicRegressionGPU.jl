@@ -892,11 +892,12 @@ function start_psrn_task(
             @info "Initializing PSRN model..."
             psrn = PSRN(
                 n_variables = length(top_subtrees),
-                # operators = ["Add", "Mul", "Div", "Sub", "Identity", "Sin", "Cos", "Exp", "Log"], # "Operator identity not found in operators for expression type
-                operators = ["Add", "Mul", "Div", "Sub", "Sin", "Cos", "Exp", "Log"],
+                operators = ["Add", "Mul", "Div", "Sub", "Identity", "Cos", "Exp"], # "Operator identity not found in operators for expression type
+                # operators = ["Add", "Mul", "Div", "Sub", "Sin", "Cos", "Exp", "Log"],
                 n_symbol_layers = 2, # TODO - only use 2 layers for debugging, and no DRmask
                 backend = get_preferred_backend(),
-                initial_expressions = top_subtrees
+                initial_expressions = top_subtrees,
+                options = options
             )
             @info "PSRN model initialization complete" psrn
 
@@ -1036,10 +1037,17 @@ function process_psrn_results!(
     while isready(manager.channel)
         new_expressions = take!(manager.channel)
         if !isempty(new_expressions)
-            for expr in new_expressions
-                member = PopMember(dataset, expr, options; deterministic=false)
-                # @info "PSRN member: $member"
-                # @info "type of member: $(typeof(member))"
+            for psrn_expr in new_expressions
+                # Create a new Expression using target type
+                converted_expr = Expression(
+                    psrn_expr.tree;  # Only keep the tree structure
+                    operators=nothing,  # Set to nothing
+                    variable_names=nothing  # Set to nothing
+                )
+                
+                member = PopMember(dataset, converted_expr, options; deterministic=false)
+                @info "PSRN member: $member"
+                @info "type of member: $(typeof(member))"
                 update_hall_of_fame!(hall_of_fame, [member], options)
             end
             @info "Added PSRN results to hall of fame"
@@ -1448,6 +1456,7 @@ function _info_dump(
                 ropt.progress ? displaysize(stdout)[2] : nothing,
                 Some(nothing)
             )
+        
         )
         println(equation_strings)
     end

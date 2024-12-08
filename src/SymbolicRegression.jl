@@ -863,7 +863,7 @@ function start_psrn_task(
     
     # Check if PSRN needs to be executed
     # TODO - This is obviously not efficient, but it works for now
-    if manager.call_count % 10 != 0  # This command is executed every 10 times
+    if manager.call_count % 2 != 0  # This command is executed every 10 times
         return
     end
     
@@ -872,16 +872,16 @@ function start_psrn_task(
         return
     end
     
-    @info "Starting PSRN computation ($(manager.call_count ÷ 10)/10 times)"
+    @info "Starting PSRN computation ($(manager.call_count ÷ 2)/2 times)"
     
     # Start a new asynchronous task
     manager.current_task = @async begin
         try
             # 1. Select the top 3 most common subtrees 
-            @info "Starting subtree selection..."
-            top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
-            # top_subtrees = select_top_subtrees(common_subtrees, 10) # TODO - need to adjust this number in the future
-            @info "Selected subtrees:" top_subtrees
+            # @info "Starting subtree selection..."
+            # top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
+            top_subtrees = select_top_subtrees(common_subtrees, 10) # TODO - need to adjust this number in the future
+            # @info "Selected subtrees:" top_subtrees
 
             # 2. Computed mapping value
             # @info "Computing mapping values..."
@@ -889,25 +889,24 @@ function start_psrn_task(
             # @info "Computed mapping values:" size(X_mapped) typeof(X_mapped)
 
             # 3. Initialize the PSRN
-            @info "Initializing PSRN model..."
+            # @info "Initializing PSRN model..."
             psrn = PSRN(
                 n_variables = length(top_subtrees),
-                operators = ["Add", "Mul", "Div", "Sub", "Identity", "Cos", "Exp"], # "Operator identity not found in operators for expression type
-                # operators = ["Add", "Mul", "Div", "Sub", "Sin", "Cos", "Exp", "Log"],
+                operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],        # this should be the same as the operators in options
                 n_symbol_layers = 2, # TODO - only use 2 layers for debugging, and no DRmask
                 backend = get_preferred_backend(),
                 initial_expressions = top_subtrees,
                 options = options
             )
-            @info "PSRN model initialization complete" psrn
+            # @info "PSRN model initialization complete" psrn
 
-            @info "Finding best expressions..."
+            # @info "Finding best expressions..."
 
             # function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray; top_k::Int=100)
             best_expressions, mse_values = get_best_expressions(psrn, X_mapped, dataset.y, top_k=100)
-            @info "Found best expressions" length(best_expressions)
-            @info "MSE values:" mse_values
-            @info "Best expressions:" best_expressions
+            # @info "Found best expressions" length(best_expressions)
+            # @info "MSE values:" mse_values
+            # @info "Best expressions:" best_expressions
 
             put!(manager.channel, best_expressions)
 
@@ -996,7 +995,7 @@ function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::Ab
         end
     end
     
-    @info "Evaluation complete" result_size=size(result)
+    # @info "Evaluation complete" result_size=size(result)
     return result
 end
 
@@ -1017,12 +1016,13 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
     threshold = length(trees) * 0.1 # TODO need to adjust this threshold in tghe future
     common_patterns = filter(p -> p.second >= threshold, subtree_counts)
     
-    if !isempty(common_patterns)
-        println("\nCommon subtree patterns:")
-        for (pattern, count) in common_patterns
-            println("- $(string_tree(pattern)) (appeared $count times)")
-        end
-    end
+    # if !isempty(common_patterns)
+    #     println("\nCommon subtree patterns:")
+    #     for (pattern, count) in common_patterns
+    #         # println("- $(string_tree(pattern)) (appeared $count times)")
+    #         @info pattern
+    #     end
+    # end
     
     return common_patterns
 end
@@ -1046,8 +1046,8 @@ function process_psrn_results!(
                 )
                 
                 member = PopMember(dataset, converted_expr, options; deterministic=false)
-                @info "PSRN member: $member"
-                @info "type of member: $(typeof(member))"
+                # @info "PSRN member: $member"
+                # @info "type of member: $(typeof(member))"
                 update_hall_of_fame!(hall_of_fame, [member], options)
             end
             @info "Added PSRN results to hall of fame"
@@ -1193,20 +1193,22 @@ function _main_search_loop!(
             dominating_trees = [member.tree for member in dominating]
             # println("Extracted trees: ", dominating_trees)
 
-            # println("Analyzing common subtrees...")
-            common_patterns = analyze_common_subtrees(dominating_trees)
-            # println("Number of common subtrees found: ", length(common_patterns))
+            if false
+                # println("Analyzing common subtrees...")
+                common_patterns = analyze_common_subtrees(dominating_trees)
+                # println("Number of common subtrees found: ", length(common_patterns))
 
-            # asynchronous calls PSRN
-            start_psrn_task(psrn_manager, common_patterns, dominating_trees, dataset, options)
-            
-            # process any completed PSRN results
-            process_psrn_results!(
-                psrn_manager,
-                state.halls_of_fame[j],
-                dataset,
-                options
-            )
+                # asynchronous calls PSRN
+                start_psrn_task(psrn_manager, common_patterns, dominating_trees, dataset, options)
+                
+                # process any completed PSRN results
+                process_psrn_results!(
+                    psrn_manager,
+                    state.halls_of_fame[j],
+                    dataset,
+                    options
+                )
+            end
 
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)
@@ -1273,19 +1275,19 @@ function _main_search_loop!(
             state.cur_maxsizes[j] = get_cur_maxsize(;
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
-            # move_window!(state.all_running_search_statistics[j])
-            # if !isnothing(progress_bar)
-            #     head_node_occupation = estimate_work_fraction(resource_monitor)
-            #     update_progress_bar!(
-            #         progress_bar,
-            #         only(state.halls_of_fame),
-            #         only(datasets),
-            #         options,
-            #         equation_speed,
-            #         head_node_occupation,
-            #         ropt.parallelism,
-            #     )
-            # end
+            move_window!(state.all_running_search_statistics[j])
+            if !isnothing(progress_bar)
+                head_node_occupation = estimate_work_fraction(resource_monitor)
+                update_progress_bar!(
+                    progress_bar,
+                    only(state.halls_of_fame),
+                    only(datasets),
+                    options,
+                    equation_speed,
+                    head_node_occupation,
+                    ropt.parallelism,
+                )
+            end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end

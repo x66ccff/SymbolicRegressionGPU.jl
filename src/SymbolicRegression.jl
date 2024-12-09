@@ -135,6 +135,8 @@ using DynamicExpressions:
     with_contents,
     with_metadata
 using DynamicExpressions: with_type_parameters
+# TODO: Reexport D once DynamicAutodiff is registered
+# @reexport using DynamicAutodiff: D
 @reexport using LossFunctions:
     MarginLoss,
     DistanceLoss,
@@ -634,7 +636,7 @@ end
 @stable default_mode = "disable" function _create_workers(
     datasets::Vector{D}, ropt::AbstractRuntimeOptions, options::AbstractOptions
 ) where {T,L,D<:Dataset{T,L}}
-    stdin_reader = watch_stream(stdin)
+    stdin_reader = watch_stream(options.input_stream)
 
     record = RecordType()
     @recorder record["options"] = "$(options)"

@@ -852,95 +852,36 @@ mutable struct PSRNManager
     PSRNManager() = new(Channel{Vector{Expression}}(32), nothing, 0)
 end
 
-function start_psrn_task(
-    manager::PSRNManager,
-    common_subtrees::Dict{Node,Int}, 
-    dominating_trees::Vector{<:Expression},
-    dataset::Dataset,
-    options::AbstractOptions
-)
-    manager.call_count += 1
+
+function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int, options::AbstractOptions)
+    # 首先过滤出complexity <= 10的子树
+    filtered_subtrees = filter(pair -> begin
+        node = pair.first
+        # 使用compute_complexity计算每个子树的复杂度
+        complexity = compute_complexity(node, options)  # 使用默认options
+        return complexity <= 20
+    end, common_subtrees)
     
-    # Check if PSRN needs to be executed
-    # TODO - This is obviously not efficient, but it works for now
-    if manager.call_count % 2 != 0  # This command is executed every 10 times
-        return
-    end
+    # 按出现频率排序,添加随机噪声
+    sorted_subtrees = sort(collect(filtered_subtrees), by=x->(x[2] * (1.0 + 0.3 * randn())), rev=true)
     
-    # If an existing task is running, do not start a new task
-    if manager.current_task !== nothing && !istaskdone(manager.current_task)
-        return
-    end
-    
-    @info "Starting PSRN computation ($(manager.call_count ÷ 2)/2 times)"
-    
-    # Start a new asynchronous task
-    manager.current_task = @async begin
-        try
-            # 1. Select the top 3 most common subtrees 
-            # @info "Starting subtree selection..."
-            # top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
-            top_subtrees = select_top_subtrees(common_subtrees, 10) # TODO - need to adjust this number in the future
-            # top_subtrees = select_top_subtrees(common_subtrees, 20) # TODO - need to adjust this number in the future
-            # @info "Selected subtrees:" top_subtrees
-
-            # 2. Computed mapping value
-            # @info "Computing mapping values..."
-            X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-            # @info "Computed mapping values:" size(X_mapped) typeof(X_mapped)
-
-            # 3. Initialize the PSRN
-            # @info "Initializing PSRN model..."
-            psrn = PSRN(
-                n_variables = length(top_subtrees),
-                operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],        # this should be the same as the operators in options
-                n_symbol_layers = 2, # TODO - only use 2 layers for debugging, and no DRmask
-                backend = get_preferred_backend(),
-                initial_expressions = top_subtrees,
-                options = options
-            )
-            # @info "PSRN model initialization complete" psrn
-
-            # @info "Finding best expressions..."
-
-            # function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray; top_k::Int=100)
-            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, dataset.y, top_k=100)
-            # @info "Found best expressions" length(best_expressions)
-            # @info "MSE values:" mse_values
-            # @info "Best expressions:" best_expressions
-
-            put!(manager.channel, best_expressions)
-
-        catch e
-            bt = stacktrace(catch_backtrace())
-            @error """
-            PSRN task execution error:
-            Error type: $(typeof(e))
-            Error message: $e
-            Error location: $(bt[1])
-            Full stack:
-            $(join(string.(bt), "\n"))
-            """
-        end
-    end
-end
-
-function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int)
-    # Sort by frequency and select the first n
-    sorted_subtrees = sort(collect(common_subtrees), by=x->x[2], rev=true)
-    
-    # Initializes the result array
+    # 初始化结果数组
     result = Node[]
     
-    # Add available subtrees
+    # 添加可用的子树
     for i in 1:min(n, length(sorted_subtrees))
         push!(result, sorted_subtrees[i][1])
     end
     
-    # If the number is less than n, add constant nodes
+    # 如果数量不足n，添加常数节点补充
     while length(result) < n
-        # 使用正确的Node构造函数创建常量节点
-        push!(result, Node(; val=Float32(1.0)))  # 使用命名参数构造函数
+        # 计算当前需要填充的数字
+        current_num = (length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1
+        # 判断是否应该是正数还是负数
+        is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
+        val = is_positive ? Float32(current_num) : Float32(-current_num)
+        # 使用命名参数构造函数创建节点
+        push!(result, Node(; val=val))
     end
     
     return result
@@ -1028,34 +969,6 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
     return common_patterns
 end
 
-# Check and process PSRN results
-function process_psrn_results!(
-    manager::PSRNManager,
-    hall_of_fame::HallOfFame,
-    dataset::Dataset,
-    options::AbstractOptions
-)
-    while isready(manager.channel)
-        new_expressions = take!(manager.channel)
-        if !isempty(new_expressions)
-            for psrn_expr in new_expressions
-                # Create a new Expression using target type
-                converted_expr = Expression(
-                    psrn_expr.tree;  # Only keep the tree structure
-                    operators=nothing,  # Set to nothing
-                    variable_names=nothing  # Set to nothing
-                )
-                
-                member = PopMember(dataset, converted_expr, options; deterministic=false)
-                # @info "PSRN member: $member"
-                # @info "type of member: $(typeof(member))"
-                update_hall_of_fame!(hall_of_fame, [member], options)
-            end
-            @info "Added PSRN results to hall of fame"
-        end
-    end
-end
-
 # Gets all the subtrees of an expression tree
 function get_subtrees(expr::Expression)
     if isnothing(expr.tree)
@@ -1086,6 +999,108 @@ end
 
 get_subtrees(x::Number) = Node[]
 get_subtrees(x::Symbol) = Node[]
+
+function start_psrn_task(
+    manager::PSRNManager,
+    dominating_trees::Vector{<:Expression},
+    dataset::Dataset,
+    options::AbstractOptions
+)
+    manager.call_count += 1
+    
+    # Check if PSRN needs to be executed
+    # TODO - This is obviously not efficient, but it works for now
+    if manager.call_count % 2 != 0  # This command is executed every 10 times
+        return
+    end
+    
+    # If an existing task is running, do not start a new task
+    if manager.current_task !== nothing && !istaskdone(manager.current_task)
+        return
+    end
+    
+    @info "Starting PSRN computation ($(manager.call_count ÷ 2)/2 times)"
+    
+    # Start a new asynchronous task
+    manager.current_task = @async begin
+        try
+
+            common_subtrees = analyze_common_subtrees(dominating_trees)
+            # 1. Select the top 3 most common subtrees 
+            # @info "Starting subtree selection..."
+            # top_subtrees = select_top_subtrees(common_subtrees, 3) # TODO - need to adjust this number in the future
+            top_subtrees = select_top_subtrees(common_subtrees, 10, options) # TODO - need to adjust this number in the future
+            # top_subtrees = select_top_subtrees(common_subtrees, 20, options) # TODO - need to adjust this number in the future
+            @info "Selected subtrees:" top_subtrees
+
+            # 2. Computed mapping value
+            # @info "Computing mapping values..."
+            X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
+            # @info "Computed mapping values:" size(X_mapped) typeof(X_mapped)
+
+            # 3. Initialize the PSRN
+            # @info "Initializing PSRN model..."
+            psrn = PSRN(
+                n_variables = length(top_subtrees),
+                operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],        # this should be the same as the operators in options
+                n_symbol_layers = 2, # TODO - only use 2 layers for debugging, and no DRmask
+                backend = get_preferred_backend(),
+                initial_expressions = top_subtrees,
+                options = options
+            )
+            # @info "PSRN model initialization complete" psrn
+
+            # @info "Finding best expressions..."
+
+            # function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray; top_k::Int=100)
+            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, dataset.y, top_k=100)
+            # @info "Found best expressions" length(best_expressions)
+            # @info "MSE values:" mse_values
+            # @info "Best expressions:" best_expressions
+
+            put!(manager.channel, best_expressions)
+
+        catch e
+            bt = stacktrace(catch_backtrace())
+            @error """
+            PSRN task execution error:
+            Error type: $(typeof(e))
+            Error message: $e
+            Error location: $(bt[1])
+            Full stack:
+            $(join(string.(bt), "\n"))
+            """
+        end
+    end
+end
+
+# Check and process PSRN results
+function process_psrn_results!(
+    manager::PSRNManager,
+    hall_of_fame::HallOfFame,
+    dataset::Dataset,
+    options::AbstractOptions
+)
+    while isready(manager.channel)
+        new_expressions = take!(manager.channel)
+        if !isempty(new_expressions)
+            for psrn_expr in new_expressions
+                # Create a new Expression using target type
+                converted_expr = Expression(
+                    psrn_expr.tree;  # Only keep the tree structure
+                    operators=nothing,  # Set to nothing
+                    variable_names=nothing  # Set to nothing
+                )
+                
+                member = PopMember(dataset, converted_expr, options; deterministic=false)
+                # @info "PSRN member: $member"
+                # @info "type of member: $(typeof(member))"
+                update_hall_of_fame!(hall_of_fame, [member], options)
+            end
+            @info "Added PSRN results to hall of fame"
+        end
+    end
+end
 
 
 function _main_search_loop!(
@@ -1196,11 +1211,11 @@ function _main_search_loop!(
 
             if true # if use PSRN
                 # println("Analyzing common subtrees...")
-                common_patterns = analyze_common_subtrees(dominating_trees)
+                # common_patterns = analyze_common_subtrees(dominating_trees)
                 # println("Number of common subtrees found: ", length(common_patterns))
 
                 # asynchronous calls PSRN
-                start_psrn_task(psrn_manager, common_patterns, dominating_trees, dataset, options)
+                start_psrn_task(psrn_manager, dominating_trees, dataset, options)
                 
                 # process any completed PSRN results
                 process_psrn_results!(
@@ -1355,6 +1370,8 @@ function _main_search_loop!(
     end
     return nothing
 end
+
+
 function _tear_down!(
     state::AbstractSearchState, ropt::AbstractRuntimeOptions, options::AbstractOptions
 )

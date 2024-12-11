@@ -55,12 +55,48 @@ function _precompile_psrn_evaluation()
                 operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
                 n_symbol_layers = 2,
                 backend = CUDA.CUDABackend(),
-                initial_expressions = trees,
+                # initial_expressions = trees,
                 options = options
             )
         
-            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, y, top_k=100)
+            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, y, trees, options, top_k=100)
         end
+        
+    end
+end
+
+function _precompile_psrn_evaluation2()
+    @setup_workload begin
+        T = Float32
+        n_samples = 10
+        n_subtrees = 5
+        
+        X_mapped = rand(T, n_samples, n_subtrees)
+        y = rand(T, 1, n_samples)
+        
+        options = Options(; binary_operators=(+, *, -, /), unary_operators=(cos, sin, exp, log))
+        operators = options.operators
+        variable_names = ["x1"]
+        
+        trees = Vector{Expression}()
+        for i in 1:n_subtrees
+            x1 = Expression(Node{T}(; feature=1); operators, variable_names)
+            tree = x1 * x1
+            push!(trees, tree)
+        end
+        @compile_workload begin
+            psrn = PSRN(
+                n_variables = n_subtrees,
+                operators = ["Add", "Mul", "Sub", "Div", "Identity"],
+                n_symbol_layers = 3,
+                backend = CUDA.CUDABackend(),
+                # initial_expressions = trees,
+                options = options
+            )
+        
+            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, y, trees, options, top_k=100)
+        end
+        
     end
 end
 
@@ -124,9 +160,10 @@ function do_precompilation(::Val{mode}) where {mode}
     end
 
     precompile(PSRN, (Int, Vector{String}, Int, Any, Vector{Expression}, Options))
-    precompile(get_best_expressions, (PSRN, AbstractArray, AbstractArray))
+    precompile(get_best_expressions, (PSRN, AbstractArray, AbstractArray, Any, Options, Int))
     
     _precompile_psrn_evaluation()
+    # _precompile_psrn_evaluation2()
 
     return nothing
 end

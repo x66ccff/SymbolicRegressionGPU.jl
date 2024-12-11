@@ -143,21 +143,10 @@ function get_triu_indices(n::Int, backend)
             end
         end
         # Returns the corresponding array based on the backend type
+        # println("to_device from ==> [get_triu_indices]")
         return (to_device(row_idx, backend), to_device(col_idx, backend))
     end
 end
-
-function to_device(x::AbstractArray, backend)
-    if isa(backend, KA.GPU) && CUDA.functional()
-        return CuArray(x)
-    elseif @isdefined(ROCArray) && isa(backend, KA.GPU) && AMDGPU.functional()
-        return ROCArray(x)
-    elseif @isdefined(oneArray) && isa(backend, KA.GPU) && oneAPI.functional()
-        return oneArray(x)
-    end
-    return x
-end
-
 
 function get_op_and_offset(layer::SymbolLayer, index::Int)
     out_dim_cum_ls = get_out_dim_cum_ls(layer)
@@ -277,7 +266,7 @@ mutable struct PSRN
     operators::Vector{Operator}
     n_symbol_layers::Int
     layers::Vector{SymbolLayer}
-    current_exprs::Vector{Expression}
+    base_exprs::Vector{Expression}
     out_dim::Int
     backend::Any
     options::Options
@@ -286,8 +275,8 @@ mutable struct PSRN
         n_variables::Int=1,
         operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg", "Inv"],
         n_symbol_layers::Int=2,
-        backend=KA.CPU(),
-        initial_expressions=nothing,
+        # backend=KA.CPU(),
+        backend=CUDA.CUDABackend(),
         options=nothing
     )
 
@@ -297,59 +286,40 @@ mutable struct PSRN
         #     populations=20,
         #     parsimony=0.0001 
         # )
-        
+        variable_names = ["x$i" for i in 1:n_variables]
+        base_exprs = [Expression(
+            Node(Float32; feature=i);
+            operators=options.operators,
+            variable_names=variable_names
+        ) for i in 1:n_variables] # default
+
         layers = SymbolLayer[]
-        for i in 1:n_symbol_layers
-            in_dim = i == 1 ? n_variables : layers[end].out_dim
+        for i in 1:Int(n_symbol_layers)
+            in_dim = i == 1 ? Int(n_variables) : Int(layers[end].out_dim)
             layer = SymbolLayer(in_dim, operators)
             init_offset(layer, backend)
             push!(layers, layer)
         end
         
-        # Create initial expression
-        variable_names = ["x$i" for i in 1:n_variables]
-        
-        # Process based on the type of initial_expressions
-        current_exprs = if isnothing(initial_expressions)
-            # Variable expressions are used by default
-            [Expression(
-                Node(Float32; feature=i);
-                operators=options.operators,
-                variable_names=variable_names
-            ) for i in 1:n_variables]
-        elseif initial_expressions isa Vector{Node}
-            # If it is a Node array, convert it to an Expression array
-            [Expression(
-                node;
-                operators=options.operators,
-                variable_names=variable_names
-            ) for node in initial_expressions]
-        elseif initial_expressions isa Vector{Expression}
-            # If it is already an Expression array, use it directly
-            initial_expressions
-        else
-            throw(ArgumentError("initial_expressions must be Nothing, Vector{Node}, or Vector{Expression}"))
-        end
-        
         operator_list = [OPERATORS[name] for name in operators]
-        out_dim = layers[end].out_dim
+        out_dim = Int(layers[end].out_dim)
         
         new(n_variables, operator_list, n_symbol_layers, layers,
-            current_exprs, out_dim, backend, options)
+        base_exprs, out_dim, backend, options)
     end
 end
 
 
 function _get_expr(psrn::PSRN, index::Int, layer_idx::Int)
     if layer_idx < 1
-        return psrn.current_exprs[index]
+        return psrn.base_exprs[index]
     end
     
     layer = psrn.layers[layer_idx]
     op, offsets = get_op_and_offset(layer, index)
     
     # Get subexpression
-    expr1 = _get_expr(psrn, offsets[1], layer_idx-1)
+    expr1 = _get_expr(psrn, offsets[1], Int(layer_idx-1))
     T = eltype(expr1.tree)  # Gets the type of the expression
     
     if op isa UnaryOperator
@@ -360,13 +330,13 @@ function _get_expr(psrn::PSRN, index::Int, layer_idx::Int)
         return op.op(expr1)
     else
         # Create a binary operation expression
-        expr2 = _get_expr(psrn, offsets[2], layer_idx-1)
+        expr2 = _get_expr(psrn, offsets[2], Int(layer_idx-1))
         return op.op(expr1, expr2)
     end
 end
 
-function get_expr(psrn::PSRN, index::Int)
-    return _get_expr(psrn, index, length(psrn.layers))
+function get_expr(psrn::PSRN, index::Int64)
+    return _get_expr(psrn, Int(index), Int(length(psrn.layers)))
 end
 
 # Add a forward propagation function for PSRN
@@ -377,6 +347,7 @@ function forward(psrn::PSRN, x::AbstractArray{T}) where T
     ))
     
     # Make sure the data is on the correct device
+    # println("to_device from ==> [forward]")
     x_device = to_device(x, psrn.backend)
     
     # Forward propagation
@@ -468,18 +439,6 @@ function Base.show(io::IO, psrn::PSRN)
     print(io, join([layer.out_dim for layer in psrn.layers], " → "))
 end
 
-function to_device(psrn::PSRN, backend)
-    # Create a new PSRN instance and update backend
-    new_psrn = PSRN(
-        n_variables=psrn.n_variables,
-        operators=[op.name for op in psrn.operators],
-        n_symbol_layers=psrn.n_symbol_layers,
-        backend=backend,
-        initial_expressions=psrn.current_exprs  # Pass the current base expression from hall of fame
-    )
-    return new_psrn
-end
-
 function get_square_indices(n::Int, backend)
     if backend isa KA.CPU
         indices = Tuple{Int,Int}[]
@@ -499,6 +458,7 @@ function get_square_indices(n::Int, backend)
                 push!(col_idx, j)
             end
         end
+        # println("to_device from ==> [get_square_indices]")
         return (to_device(row_idx, backend), to_device(col_idx, backend))
     end
 end
@@ -527,8 +487,9 @@ function to_device(x::AbstractArray, backend::Union{Module,KA.Backend})
     return Array(x)
 end
 
-function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=100)
+function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=Int(100))
     backend = outputs isa CUDA.CuArray ? CUDA : CPU
+    # println("to_device from ==> [find_best_indices]")
     y_device = to_device(y, backend)
     
     # Calculate the MSE for each output with respect to the target value
@@ -562,14 +523,39 @@ function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=
     return sorted_indices, mean_squared_errors_cpu[sorted_indices]
 end
 
-function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray; top_k::Int=100)
+function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray, base_exprs::Any, options::Options; top_k::Int=100)
     backend = get_preferred_backend()
+    # println("to_device from ==> [get_best_expressions]")
     X_device = to_device(X, backend)
     
     outputs = forward(psrn, X_device)
     
-    best_indices, mse_values = find_best_indices(outputs, y; top_k=top_k)
-    
+    best_indices, mse_values = find_best_indices(outputs, y; top_k=Int(top_k))
+
+    # Process based on the type of initial_expressions
+    n_variables = size(X_device, 2)
+    variable_names = ["x$i" for i in 1:n_variables]
+    psrn.base_exprs = if isnothing(base_exprs)
+        # Variable expressions are used by default
+        [Expression(
+            Node(Float32; feature=i);
+            operators=options.operators,
+            variable_names=variable_names
+        ) for i in 1:n_variables]
+    elseif base_exprs isa Vector{Node}
+        # If it is a Node array, convert it to an Expression array
+        [Expression(
+            node;
+            operators=options.operators,
+            variable_names=variable_names
+        ) for node in base_exprs]
+    elseif base_exprs isa Vector{Expression}
+        # If it is already an Expression array, use it directly
+        base_exprs
+    else
+        throw(ArgumentError("base_exprs must be Nothing, Vector{Node}, or Vector{Expression}"))
+    end
+
     best_expressions = [get_expr(psrn, idx) for idx in best_indices]
     
     # println("Best expressions:")

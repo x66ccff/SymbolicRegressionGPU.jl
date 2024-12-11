@@ -104,7 +104,6 @@ using SymbolicRegression
 ###################### 
 # exit()
 
-# 包装主要计算逻辑到一个函数中
 function main_computation()
     X = randn(Float32, 5, 100)
     y = 2 * cos.(X[4, :]).^3 + X[1, :] .^ 2 .- 2
@@ -130,7 +129,6 @@ function main_computation()
     end
 end
 
-# 使用StatProfilerHTML进行性能分析
 # @profilehtml main_computation()
 # main_computation()
 @time main_computation()

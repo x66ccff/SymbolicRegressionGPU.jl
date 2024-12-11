@@ -70,6 +70,8 @@
 
 # julia --project=. dev/debug.jl
 
+# export JULIA_NUM_THREADS=4 #############<<<<<<<<<<<<<< set this !!!
+
 # 1. Set up the environment and paths
 using Pkg
 Pkg.activate(@__DIR__)  # Activate the environment in the current directory
@@ -130,4 +132,5 @@ end
 
 # 使用StatProfilerHTML进行性能分析
 # @profilehtml main_computation()
-main_computation()
+# main_computation()
+@time main_computation()

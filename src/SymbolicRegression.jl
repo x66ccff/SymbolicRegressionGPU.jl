@@ -1023,9 +1023,15 @@ function start_psrn_task(
     
     @info "Starting PSRN computation ($(manager.call_count ÷ 2)/2 times)"
     
+    @info "Before"
+    @info "threadid" Threads.threadid()
+    @info "total nthreads" Threads.nthreads()
     # Start a new asynchronous task
-    manager.current_task = @async begin
+    manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
         try
+            @info "After"
+            @info "threadid" Threads.threadid()
+            @info "total nthreads" Threads.nthreads()
 
             common_subtrees = analyze_common_subtrees(dominating_trees)
             # 1. Select the top 3 most common subtrees 

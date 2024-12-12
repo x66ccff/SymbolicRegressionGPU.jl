@@ -279,13 +279,6 @@ mutable struct PSRN
         backend=CUDA.CUDABackend(),
         options=nothing
     )
-
-        # options = Options(;
-        #     binary_operators=[+, -, *, /, ^],
-        #     unary_operators=[cos, exp, sin, log],  # kkTODO
-        #     populations=20,
-        #     parsimony=0.0001 
-        # )
         variable_names = ["x$i" for i in 1:n_variables]
         base_exprs = [Expression(
             Node(Float32; feature=i);
@@ -342,16 +335,16 @@ end
 # Add a forward propagation function for PSRN
 function forward(psrn::PSRN, x::AbstractArray{T}) where T
     # Check input dimension
-    size(x, 2) == psrn.n_variables || throw(DimensionMismatch(
-        "Input should have $(psrn.n_variables) features, got $(size(x, 2))"
-    ))
+    # size(x, 2) == psrn.n_variables || throw(DimensionMismatch(
+    #     "Input should have $(psrn.n_variables) features, got $(size(x, 2))"
+    # ))
     
     # Make sure the data is on the correct device
     # println("to_device from ==> [forward]")
-    x_device = to_device(x, psrn.backend)
+    # x_device = to_device(x, psrn.backend)
     
     # Forward propagation
-    h = x_device
+    h = x
     for layer in psrn.layers
         h = forward(layer, h, psrn.backend)
     end
@@ -527,7 +520,7 @@ function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray, ba
     backend = get_preferred_backend()
     # println("to_device from ==> [get_best_expressions]")
     X_device = to_device(X, backend)
-    
+
     outputs = forward(psrn, X_device)
     
     best_indices, mse_values = find_best_indices(outputs, y; top_k=Int(top_k))

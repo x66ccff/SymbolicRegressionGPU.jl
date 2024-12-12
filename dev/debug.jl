@@ -105,8 +105,9 @@ using SymbolicRegression
 # exit()
 
 function main_computation()
-    X = randn(Float32, 5, 100)
+    X = randn(Float32, 5, 101)
     y = 2 * cos.(X[4, :]).^3 + X[1, :] .^ 2 .- 2
+    # y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
 
     options = SymbolicRegression.Options(;
         binary_operators=[+, *, /, -], 

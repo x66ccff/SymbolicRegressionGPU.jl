@@ -90,7 +90,7 @@ using Distributed
 using Printf: @printf, @sprintf
 using Pkg: Pkg
 using TOML: parsefile
-using Random: seed!, shuffle!
+using Random: seed!, shuffle!, randperm
 using Reexport
 using ProgressMeter: finish!
 using DynamicExpressions:
@@ -852,12 +852,14 @@ mutable struct PSRNManager
     call_count::Int
     N_PSRN_INPUT::Int
     net::PSRN
-
+    max_samples::Int
+    
     function PSRNManager(;
         N_PSRN_INPUT::Int,
         operators::Vector{String},
         n_symbol_layers::Int,
-        options::Options
+        options::Options,
+        max_samples::Int=100
     )
         psrn = PSRN(
             n_variables = N_PSRN_INPUT,
@@ -872,7 +874,8 @@ mutable struct PSRNManager
             nothing,
             0,
             N_PSRN_INPUT,
-            psrn
+            psrn,
+            max_samples
         )
     end
 end
@@ -1026,11 +1029,11 @@ function start_psrn_task(
 
     # Check if PSRN needs to be executed
     # TODO - This is obviously not efficient, but it works for now
-    if manager.call_count % 2 != 0 || (manager.current_task !== nothing && !istaskdone(manager.current_task))
+    if manager.call_count % 1 != 0 || (manager.current_task !== nothing && !istaskdone(manager.current_task))
         return
     end
     
-    @info "Starting PSRN computation ($(manager.call_count ÷ 2)/2 times)"
+    @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
     
     manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
         try
@@ -1042,9 +1045,38 @@ function start_psrn_task(
             # @info "Selected subtrees:" top_subtrees
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
+            
+            # 添加降采样逻辑
+            n_samples = size(X_mapped, 1)
+            if n_samples > manager.max_samples
+                # 随机选择max_samples个样本点
+                sample_indices = randperm(n_samples)[1:manager.max_samples]
+                X_mapped_sampled = X_mapped[sample_indices, :]
+                
+                # 检查 dataset.y 的维度
+                y_dims = size(dataset.y)
+                if length(y_dims) == 1
+                    y_sampled = dataset.y[sample_indices]
+                else
+                    y_sampled = dataset.y[:, sample_indices]
+                end
+            else
+                X_mapped_sampled = X_mapped
+                y_sampled = dataset.y
+            end
 
-            best_expressions, mse_values = get_best_expressions(manager.net, X_mapped, dataset.y,
-                                                top_subtrees, options, top_k=100)
+
+            # 添加调试信息
+            # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
+
+            best_expressions, mse_values = get_best_expressions(
+                manager.net, 
+                X_mapped_sampled,
+                y_sampled,
+                top_subtrees, 
+                options, 
+                top_k=100
+            )
 
             put!(manager.channel, best_expressions)
 
@@ -1086,7 +1118,7 @@ function process_psrn_results!(
                 # @info "type of member: $(typeof(member))"
                 update_hall_of_fame!(hall_of_fame, [member], options)
             end
-            # @info "Added PSRN results to hall of fame"
+            @info "Added PSRN results to hall of fame"
         end
     end
 end
@@ -1122,8 +1154,11 @@ function _main_search_loop!(
     psrn_manager = PSRNManager(
         N_PSRN_INPUT = N_PSRN_INPUT,
         operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
+        # operators = ["Add", "Mul", "Sub", "Div", "Identity"],
         n_symbol_layers = 2,
-        options = options
+        options = options,
+        max_samples = 100
+        # max_samples = 10
     )
 
     if ropt.parallelism in (:multiprocessing, :multithreading)

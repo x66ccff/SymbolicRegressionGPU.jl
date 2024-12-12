@@ -61,7 +61,6 @@ function _precompile_psrn_evaluation()
         
             best_expressions, mse_values = get_best_expressions(psrn, X_mapped, y, trees, options, top_k=100)
         end
-        
     end
 end
 
@@ -94,7 +93,7 @@ function _precompile_psrn_evaluation2()
                 options = options
             )
         
-            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, y, trees, options, top_k=100)
+            best_expressions, mse_values = get_best_expressions(psrn, X_mapped, y, trees, options, top_k=20)
         end
         
     end

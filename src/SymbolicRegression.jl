@@ -1025,6 +1025,7 @@ function start_psrn_task(
             # 添加调试信息
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
             # to cuda 0
+            X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
             X_mapped_sampled = Tensor(X_mapped_sampled)
             device_id = 0
 

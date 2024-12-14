@@ -59,6 +59,7 @@ function _precompile_psrn_evaluation()
                 # initial_expressions = trees,
                 options = options
             )
+            X_mapped = Float32.(X_mapped) # for saving memory
             X_mapped = Tensor(X_mapped)
 
 

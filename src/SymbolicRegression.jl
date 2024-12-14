@@ -1002,14 +1002,14 @@ function start_psrn_task(
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
             
-            # 添加降采样逻辑
+            # add downsampling 
             n_samples = size(X_mapped, 1)
             if n_samples > manager.max_samples
-                # 随机选择max_samples个样本点
+                # random sample
                 sample_indices = randperm(n_samples)[1:manager.max_samples]
                 X_mapped_sampled = X_mapped[sample_indices, :]
                 
-                # 检查 dataset.y 的维度
+                # check the dimension of dataset.y
                 y_dims = size(dataset.y)
                 if length(y_dims) == 1
                     y_sampled = dataset.y[sample_indices]
@@ -1022,7 +1022,7 @@ function start_psrn_task(
             end
 
 
-            # 添加调试信息
+            # add debug info
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
             # to cuda 0
             X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory

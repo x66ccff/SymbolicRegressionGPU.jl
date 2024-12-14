@@ -21,7 +21,6 @@ function generate_triu_sum_script()
     """
 end
 
-# 只需要编译一次
 const TRIU_SUM_SCRIPT = THJIT.compile(generate_triu_sum_script())
 
 function triu_sum(tensor::Tensor)
@@ -37,7 +36,6 @@ function generate_triu_mul_script()
     """
 end
 
-# 只需要编译一次
 const TRIU_MUL_SCRIPT = THJIT.compile(generate_triu_mul_script())
 
 function triu_mul(tensor::Tensor)
@@ -63,7 +61,6 @@ function generate_sub_script()
     """
 end
 
-# 编译两个脚本
 const DIV_SCRIPT = THJIT.compile(generate_div_script())
 const SUB_SCRIPT = THJIT.compile(generate_sub_script())
 

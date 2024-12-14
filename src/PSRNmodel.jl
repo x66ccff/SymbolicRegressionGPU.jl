@@ -35,7 +35,7 @@ const OPERATORS = Dict{String, Operator}(
     "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
     "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
     "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
-    
+
     "Add" => BinaryOperator("Add", add_kernel!, false, +),
     "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
     "Div" => BinaryOperator("Div", div_kernel!, true, /),
@@ -45,7 +45,7 @@ const OPERATORS = Dict{String, Operator}(
 )
 
 
-# 生成2-10个输入的TorchScript代码
+# generate torchscript code for concatenating tensors
 function generate_cat_script(n::Int)
     args = join(('a':'z')[1:n], ", ")
     tensors = "(" * join(('a':'z')[1:n], ", ") * ")"
@@ -55,13 +55,11 @@ function generate_cat_script(n::Int)
     """
 end
 
-# 编译所有版本
 const COMPILATION_UNITS = Dict{Int, Any}()
 for n in 2:26
     COMPILATION_UNITS[n] = THJIT.compile(generate_cat_script(n))
 end
 
-# 修改类型声明，使用更通用的类型
 function concat_tensors(tensors::Vector{<:Tensor})
     n = length(tensors)
     if n < 2
@@ -77,12 +75,10 @@ end
 function generate_topk_script(k::Int)
     return """
     def main(x):
-        # 返回indices (第二个元素，索引是1)，并squeeze掉多余维度
         return torch.topk(x, k=$(k), dim=1, largest=False, sorted=True)[1].squeeze()
     """
 end
 
-# 预编译常用大小的版本
 const TOPK_SCRIPTS = Dict{Int, Any}(
     k => THJIT.compile(generate_topk_script(k))
     for k in [5, 10, 20, 50, 100]

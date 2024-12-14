@@ -1,0 +1,24 @@
+name = "THArrays"
+uuid = "3ba4a88b-5b67-4a96-bb04-131d22fbab27"
+license = "MIT"
+desc = "Julia interface of PyTorch"
+repo = "https://github.com/compintell/THArrays.jl"
+version = "0.2.3"
+
+[deps]
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+Requires = "ae029012-a4dd-5104-9daa-d747884805df"
+
+[compat]
+MacroTools = "0.5.1"
+Requires = "1"
+julia = "1"
+
+[extras]
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "Random"]

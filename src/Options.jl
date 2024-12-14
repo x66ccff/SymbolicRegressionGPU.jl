@@ -600,6 +600,9 @@ $(OPTION_DESCRIPTIONS)
     recorder_file::AbstractString="pysr_recorder.json",
     ### Not search options; just construction options:
     define_helper_functions::Bool=true,
+
+    use_psrn::Bool=false,
+
     #########################################
     # Deprecated args: ######################
     output_file::Union{Nothing,AbstractString}=nothing,
@@ -986,6 +989,8 @@ function default_options(@nospecialize(version::Union{VersionNumber,Nothing} = n
             # Performance and Parallelization
             batching=false,
             batch_size=50,
+            # PSRN 
+            use_psrn=false,
         )
     else
         return (;
@@ -1035,6 +1040,8 @@ function default_options(@nospecialize(version::Union{VersionNumber,Nothing} = n
             # Performance and Parallelization
             batching=false,
             batch_size=50,
+            # PSRN 
+            use_psrn=false,
         )
     end
 end

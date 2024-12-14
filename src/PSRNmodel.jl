@@ -7,70 +7,136 @@ import ..CoreModule.OperatorsModule: plus, sub, mult, square, cube, safe_pow, sa
 
 import ..CoreModule: Options, Dataset 
 
-using KernelAbstractions
-const KA = KernelAbstractions
-using CUDA
-
-@static if Base.find_package("AMDGPU") !== nothing
-    using AMDGPU
-    using AMDGPU: ROCArray
-end
-
-@static if Base.find_package("oneAPI") !== nothing
-    using oneAPI
-    using oneAPI: oneArray
-end
-
-
 using Printf: @sprintf  
 using DynamicExpressions: Node, Expression
+using THArrays
 
+# Operator abstractions
 abstract type Operator end
 
 struct UnaryOperator <: Operator
     name::String
     kernel::Function
     is_directed::Bool
-    op::Function
+    expr_gen::Function
 end
 
 struct BinaryOperator <: Operator
     name::String
     kernel::Function
     is_directed::Bool
-    op::Function
+    expr_gen::Function
 end
 
+# Operator dictionary
 const OPERATORS = Dict{String, Operator}(
     "Identity" => UnaryOperator("Identity", identity_kernel!, true, identity),
     "Sin" => UnaryOperator("Sin", sin_kernel!, true, sin),
     "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
     "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
     "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
-    "Neg" => UnaryOperator("Neg", neg_kernel!, true, -),
+
     "Add" => BinaryOperator("Add", add_kernel!, false, +),
     "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
     "Div" => BinaryOperator("Div", div_kernel!, true, /),
     "Sub" => BinaryOperator("Sub", sub_kernel!, true, -),
-    "Pow" => BinaryOperator("Pow", pow_kernel!, true, safe_pow),
-    "Sqrt" => UnaryOperator("Sqrt", sqrt_kernel!, true, safe_sqrt)
+    "Inv" => UnaryOperator("Inv", inv_kernel!, true, x -> 1 / x),
+    "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> -x)
 )
 
-# SymbolLayer
+
+# generate torchscript code for concatenating tensors
+function generate_cat_script(n::Int)
+    args = join(('a':'z')[1:n], ", ")
+    tensors = "(" * join(('a':'z')[1:n], ", ") * ")"
+    return """
+    def main($args):
+        return torch.cat($tensors, dim=1)
+    """
+end
+
+const COMPILATION_UNITS = Dict{Int, Any}()
+for n in 2:26
+    COMPILATION_UNITS[n] = THJIT.compile(generate_cat_script(n))
+end
+
+function concat_tensors(tensors::Vector{<:Tensor})
+    n = length(tensors)
+    if n < 2
+        error("Need at least 2 tensors to concatenate")
+    elseif n > 26
+        error("Maximum 26 tensors supported")
+    end
+    
+    cu = COMPILATION_UNITS[n]
+    return cu.main(tensors...)
+end
+
+function generate_topk_script(k::Int)
+    return """
+    def main(x):
+        return torch.topk(x, k=$(k), dim=1, largest=False, sorted=True)[1].squeeze()
+    """
+end
+
+const TOPK_SCRIPTS = Dict{Int, Any}(
+    k => THJIT.compile(generate_topk_script(k))
+    for k in [5, 10, 20, 50, 100]
+)
+
+function topk_indices(tensor::Tensor, k::Int)
+    if !haskey(TOPK_SCRIPTS, k)
+        TOPK_SCRIPTS[k] = THJIT.compile(generate_topk_script(k))
+    end
+    return TOPK_SCRIPTS[k].main(tensor)
+end
+
+
+# DRLayer implementation
+mutable struct DRLayer
+    in_dim::Int
+    out_dim::Int
+    dr_indices::Tensor
+    dr_mask::Tensor
+    device::Int
+
+    function DRLayer(in_dim::Int, dr_mask::Vector{Bool}, device::Int)
+        out_dim = sum(dr_mask)
+        arange_tensor = collect(0:length(dr_mask)-1)
+        # convert to Tensor 
+        dr_indices = Tensor(arange_tensor[dr_mask])
+        dr_mask_tensor = Tensor(dr_mask)
+        # move to device
+        dr_indices = to(dr_indices, CUDA(device))
+        dr_mask_tensor = to(dr_mask_tensor, CUDA(device))
+        new(in_dim, out_dim, dr_indices, dr_mask_tensor, device)
+    end
+end
+
+function forward(layer::DRLayer, x::Tensor)
+    return x[:, layer.dr_mask]
+end
+
+function get_op_and_offset(layer::DRLayer, index::Int)
+    return Int(Array(layer.dr_indices)[index+1])
+end
+
+# SymbolLayer implementation
 mutable struct SymbolLayer
     in_dim::Int
     out_dim::Int
-    operators::Vector{Operator}  # use Operator in SR.jl instead of String
+    operators::Vector{Operator}
     n_binary_U::Int  # undirected (+ *)
     n_binary_D::Int  # directed (/ -)
     n_unary::Int
     operator_list::Vector{Operator}
-    n_triu::Int      
+    n_triu::Int
     in_dim_square::Int
     out_dim_cum_ls::Union{Vector{Int}, Nothing}
-    offset_tensor::Union{Matrix{Int}, Nothing}
-    
-    function SymbolLayer(in_dim::Int, operator_names::Vector{String})
+    offset_tensor::Union{AbstractArray, Nothing}
+    device::Int
+
+    function SymbolLayer(in_dim::Int, operator_names::Vector{String}, device::Int)
         n_binary_U = 0
         n_binary_D = 0
         n_unary = 0
@@ -79,8 +145,8 @@ mutable struct SymbolLayer
         
         n_triu = (in_dim * (in_dim + 1)) ÷ 2
         in_dim_square = in_dim * in_dim
-    
-        # count the numbers of operators
+
+        # Count operators
         for op in operators
             if op isa BinaryOperator
                 if op.is_directed
@@ -93,7 +159,7 @@ mutable struct SymbolLayer
             end
         end
 
-        # Add operators in order: first undirected binary, then directed binary, and finally unary
+        # Add operators in order
         # 1. Undirected binary operators
         for op in operators
             if op isa BinaryOperator && !op.is_directed
@@ -114,241 +180,15 @@ mutable struct SymbolLayer
                 push!(operator_list, op)
             end
         end
-        
+
         out_dim = n_unary * in_dim + n_binary_U * n_triu + n_binary_D * in_dim_square
+
+        layer = new(in_dim, out_dim, operators, n_binary_U, n_binary_D, n_unary,
+            operator_list, n_triu, in_dim_square, nothing, nothing, device)
         
-        new(in_dim, out_dim, operators, n_binary_U, n_binary_D, n_unary,
-            operator_list, n_triu, in_dim_square, nothing, nothing)
+        init_offset(layer)
+        return layer
     end
-end
-
-# Modify Index Generation Function to Use Passed-in Backend
-function get_triu_indices(n::Int, backend)
-    if backend isa KA.CPU
-        indices = Tuple{Int,Int}[]
-        for i in 1:n
-            for j in i:n
-                push!(indices, (i,j))
-            end
-        end
-        return indices
-    else
-        # return two vectors in GPU version
-        row_idx = Int[]
-        col_idx = Int[]
-        for i in 1:n
-            for j in i:n
-                push!(row_idx, i)
-                push!(col_idx, j)
-            end
-        end
-        # Returns the corresponding array based on the backend type
-        # println("to_device from ==> [get_triu_indices]")
-        return (to_device(row_idx, backend), to_device(col_idx, backend))
-    end
-end
-
-function get_op_and_offset(layer::SymbolLayer, index::Int)
-    out_dim_cum_ls = get_out_dim_cum_ls(layer)
-    
-    # Find the corresponding operator
-    op_idx = 1
-    for i in eachindex(out_dim_cum_ls)
-        if index < out_dim_cum_ls[i]
-            op_idx = i
-            break
-        end
-    end
-    
-    # Get offset
-    offset = layer.offset_tensor[index, :]
-    return layer.operator_list[op_idx], offset
-end
-
-# Add a forward propagator
-function forward(layer::SymbolLayer, x::AbstractArray, backend)
-    results = []
-    
-    for op in layer.operator_list
-        if op isa UnaryOperator
-            # Back end to get input data
-            device_backend = get_backend(x)
-            # Create and execute the kernel
-            kernel = op.kernel(device_backend, 256)
-            result = similar(x)
-            event = kernel(result, x, ndrange=size(x))
-            if event !== nothing
-                wait(event)
-            end
-            push!(results, result)
-        else # BinaryOperator
-            if op.is_directed
-                # Directed binary operation (division, subtraction)
-                device_backend = get_backend(x)
-                kernel = op.kernel(device_backend, 256)
-                
-                if device_backend isa KA.CPU
-                    for i in 1:layer.in_dim
-                        for j in 1:layer.in_dim
-                            x1 = view(x, :, i)
-                            x2 = view(x, :, j)
-                            result = similar(x1)
-                            event = kernel(result, x1, x2, ndrange=size(x1))
-                            if event !== nothing
-                                wait(event)
-                            end
-                            push!(results, result)
-                        end
-                    end
-                else
-                    # GPU version: Batch processing
-                    row_idx, col_idx = get_square_indices(layer.in_dim, device_backend)
-                    x1 = view(x, :, row_idx)
-                    x2 = view(x, :, col_idx)
-                    result = similar(x1)
-                    event = kernel(result, x1, x2, ndrange=size(x1))
-                    if event !== nothing
-                        wait(event)
-                    end
-                    push!(results, result)
-                end
-            else
-                # Undirected binary operation (e.g. addition, multiplication)
-                device_backend = get_backend(x)
-                kernel = op.kernel(device_backend, 256)
-                
-                if device_backend isa KA.CPU
-                    for i in 1:layer.in_dim
-                        for j in i:layer.in_dim
-                            x1 = view(x, :, i)
-                            x2 = view(x, :, j)
-                            result = similar(x1)
-                            event = kernel(result, x1, x2, ndrange=size(x1))
-                            if event !== nothing
-                                wait(event)
-                            end
-                            push!(results, result)
-                        end
-                    end
-                else
-                    # GPU version: Batch processing
-                    row_idx, col_idx = get_triu_indices(layer.in_dim, device_backend)
-                    x1 = view(x, :, row_idx)
-                    x2 = view(x, :, col_idx)
-                    result = similar(x1)
-                    event = kernel(result, x1, x2, ndrange=size(x1))
-                    if event !== nothing
-                        wait(event)
-                    end
-                    push!(results, result)
-                end
-            end
-        end
-    end
-    
-    return hcat(results...)
-end
-
-function get_backend(x::AbstractArray)
-    if x isa CuArray
-        return CUDA.CUDABackend()
-    elseif x isa ROCArray
-        return AMDGPU.ROCBackend()
-    elseif x isa oneArray
-        return oneAPI.oneBackend()
-    else
-        return KA.CPU()
-    end
-end
-
-mutable struct PSRN
-    n_variables::Int
-    operators::Vector{Operator}
-    n_symbol_layers::Int
-    layers::Vector{SymbolLayer}
-    base_exprs::Vector{Expression}
-    out_dim::Int
-    backend::Any
-    options::Options
-    
-    function PSRN(;
-        n_variables::Int=1,
-        operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg", "Inv"],
-        n_symbol_layers::Int=2,
-        # backend=KA.CPU(),
-        backend=CUDA.CUDABackend(),
-        options=nothing
-    )
-        variable_names = ["x$i" for i in 1:n_variables]
-        base_exprs = [Expression(
-            Node(Float32; feature=i);
-            operators=options.operators,
-            variable_names=variable_names
-        ) for i in 1:n_variables] # default
-
-        layers = SymbolLayer[]
-        for i in 1:Int(n_symbol_layers)
-            in_dim = i == 1 ? Int(n_variables) : Int(layers[end].out_dim)
-            layer = SymbolLayer(in_dim, operators)
-            init_offset(layer, backend)
-            push!(layers, layer)
-        end
-        
-        operator_list = [OPERATORS[name] for name in operators]
-        out_dim = Int(layers[end].out_dim)
-        
-        new(n_variables, operator_list, n_symbol_layers, layers,
-        base_exprs, out_dim, backend, options)
-    end
-end
-
-
-function _get_expr(psrn::PSRN, index::Int, layer_idx::Int)
-    if layer_idx < 1
-        return psrn.base_exprs[index]
-    end
-    
-    layer = psrn.layers[layer_idx]
-    op, offsets = get_op_and_offset(layer, index)
-    
-    # Get subexpression
-    expr1 = _get_expr(psrn, offsets[1], Int(layer_idx-1))
-    T = eltype(expr1.tree)  # Gets the type of the expression
-    
-    if op isa UnaryOperator
-        # Create a unary operation expression
-        if op.name == "Identity"
-            return expr1
-        end
-        return op.op(expr1)
-    else
-        # Create a binary operation expression
-        expr2 = _get_expr(psrn, offsets[2], Int(layer_idx-1))
-        return op.op(expr1, expr2)
-    end
-end
-
-function get_expr(psrn::PSRN, index::Int64)
-    return _get_expr(psrn, Int(index), Int(length(psrn.layers)))
-end
-
-# Add a forward propagation function for PSRN
-function forward(psrn::PSRN, x::AbstractArray{T}) where T
-    # Check input dimension
-    # size(x, 2) == psrn.n_variables || throw(DimensionMismatch(
-    #     "Input should have $(psrn.n_variables) features, got $(size(x, 2))"
-    # ))
-    
-    # Make sure the data is on the correct device
-    # println("to_device from ==> [forward]")
-    # x_device = to_device(x, psrn.backend)
-    
-    # Forward propagation
-    h = x
-    for layer in psrn.layers
-        h = forward(layer, h, psrn.backend)
-    end
-    return h
 end
 
 function get_out_dim_cum_ls(layer::SymbolLayer)
@@ -361,12 +201,10 @@ function get_out_dim_cum_ls(layer::SymbolLayer)
         if func isa UnaryOperator
             push!(out_dim_ls, layer.in_dim)
         else
-            if func isa BinaryOperator
-                if func.is_directed
-                    push!(out_dim_ls, layer.in_dim_square)
-                else
-                    push!(out_dim_ls, layer.n_triu)
-                end
+            if func.is_directed
+                push!(out_dim_ls, layer.in_dim_square)
+            else
+                push!(out_dim_ls, layer.n_triu)
             end
         end
     end
@@ -375,13 +213,9 @@ function get_out_dim_cum_ls(layer::SymbolLayer)
     return layer.out_dim_cum_ls
 end
 
-function init_offset(layer::SymbolLayer, backend)
-    layer.offset_tensor = get_offset_tensor(layer, backend)
-end
-
-function get_offset_tensor(layer::SymbolLayer, backend)
+function get_offset_tensor(layer::SymbolLayer)
     offset_tensor = zeros(Int, layer.out_dim, 2)
-    arange_tensor = collect(1:layer.in_dim)
+    arange_tensor = collect(0:layer.in_dim-1)
     
     binary_U_tensor = zeros(Int, layer.n_triu, 2)
     binary_D_tensor = zeros(Int, layer.in_dim_square, 2)
@@ -390,21 +224,21 @@ function get_offset_tensor(layer::SymbolLayer, backend)
     unary_tensor[:, 1] = arange_tensor
     unary_tensor[:, 2] .= layer.in_dim
     
-    # Fill binary_U_tensor(index of undirected binary operation)
+    # Fill binary_U_tensor (index of undirected binary operation)
     start = 1
-    for i in 1:layer.in_dim
-        len = layer.in_dim - i + 1
+    for i in 0:layer.in_dim-1
+        len = layer.in_dim - i
         binary_U_tensor[start:start+len-1, 1] .= i
-        binary_U_tensor[start:start+len-1, 2] = i:layer.in_dim
+        binary_U_tensor[start:start+len-1, 2] = i:layer.in_dim-1
         start += len
     end
     
-    # Fill binary_D_tensor(index of directed binary operation)
+    # Fill binary_D_tensor (index of directed binary operation)
     start = 1
-    for i in 1:layer.in_dim
+    for i in 0:layer.in_dim-1
         len = layer.in_dim
         binary_D_tensor[start:start+len-1, 1] .= i
-        binary_D_tensor[start:start+len-1, 2] = 1:layer.in_dim
+        binary_D_tensor[start:start+len-1, 2] = 0:layer.in_dim-1
         start += len
     end
     
@@ -420,147 +254,215 @@ function get_offset_tensor(layer::SymbolLayer, backend)
         offset_tensor[start:start+len-1, :] = t
         start += len
     end
-    
+    # convert to Tensor
+    # offset_tensor = Tensor(offset_tensor)
+    # move to device
+    # offset_tensor = to(offset_tensor, CUDA(layer.device))
     return offset_tensor
 end
 
-# Add print method
-function Base.show(io::IO, psrn::PSRN)
-    print(io, "PSRN(n_variables=$(psrn.n_variables), operators=$(psrn.operators), " *
-              "n_layers=$(psrn.n_symbol_layers))\n")
-    print(io, "Layer dimensions: ")
-    print(io, join([layer.out_dim for layer in psrn.layers], " → "))
+function init_offset(layer::SymbolLayer)
+    layer.offset_tensor = get_offset_tensor(layer)
 end
 
-function get_square_indices(n::Int, backend)
-    if backend isa KA.CPU
-        indices = Tuple{Int,Int}[]
-        for i in 1:n
-            for j in 1:n
-                push!(indices, (i,j))
+function get_op_and_offset(layer::SymbolLayer, index::Int)
+    out_dim_cum_ls = get_out_dim_cum_ls(layer)
+    op_idx = 1
+    for i in eachindex(out_dim_cum_ls)
+        if index < out_dim_cum_ls[i]
+            op_idx = i
+            break
+        end
+    end
+    offset = layer.offset_tensor[index+1, :]
+    return layer.operator_list[op_idx], offset
+end
+
+function forward(layer::SymbolLayer, x::Tensor)
+    results = Tensor[]
+    for op in layer.operator_list
+        result = op.kernel(x)
+        push!(results, result)
+    end
+    return concat_tensors(results)
+end
+
+# PSRN implementation
+mutable struct PSRN
+    n_variables::Int
+    operators::Vector{String}
+    n_symbol_layers::Int
+    layers::Vector{Union{SymbolLayer, DRLayer}}
+    out_dim::Int
+    use_dr_mask::Bool
+    current_expr_ls::Vector{Expression}
+    device::Int
+    options::Options
+
+    function PSRN(;
+        n_variables::Int=1,
+        operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg"],
+        n_symbol_layers::Int=3,
+        dr_mask::Union{Vector{Bool}, Nothing}=nothing,
+        device::Int=0,
+        options::Options=Options()
+    )
+        layers = Union{SymbolLayer, DRLayer}[]
+        use_dr_mask = !isnothing(dr_mask)
+
+        for i in 1:n_symbol_layers
+            if use_dr_mask && i == n_symbol_layers
+                push!(layers, DRLayer(layers[end].out_dim, dr_mask, device))
+            end
+
+            if i == 1
+                push!(layers, SymbolLayer(n_variables, operators, device))
+            else
+                push!(layers, SymbolLayer(layers[end].out_dim, operators, device))
             end
         end
-        return indices
-    else
-        # The GPU version returns two vectors
-        row_idx = Int[]
-        col_idx = Int[]
-        for i in 1:n
-            for j in 1:n
-                push!(row_idx, i)
-                push!(col_idx, j)
-            end
-        end
-        # println("to_device from ==> [get_square_indices]")
-        return (to_device(row_idx, backend), to_device(col_idx, backend))
+
+        new(n_variables, operators, n_symbol_layers, layers, 
+            layers[end].out_dim, use_dr_mask, [], device, options)
     end
 end
 
-function get_preferred_backend()
-    if CUDA.functional()
-        return CUDA.CUDABackend()
-    elseif @isdefined(AMDGPU) && AMDGPU.functional()
-        return AMDGPU.ROCBackend()
-    elseif @isdefined(oneAPI) && oneAPI.functional()
-        return oneAPI.oneBackend()
+function PSRN_forward(model::PSRN, x::Tensor)
+    h = x
+    # print the device of h
+    # @info "h device: $(on(x).index)"
+    for layer in model.layers
+        h = forward(layer, h)
     end
-    return KernelAbstractions.CPU()
+    return h
 end
 
-function to_device(x::AbstractArray, backend::Union{Module,KA.Backend})
-    if backend isa KA.GPU
-        if CUDA.functional()
-            return CuArray(x)
-        elseif @isdefined(AMDGPU) && AMDGPU.functional()
-            return ROCArray(x)
-        elseif @isdefined(oneAPI) && oneAPI.functional()
-            return oneArray(x)
-        end
+# function find_best_indices(outputs::Tensor, y::Tensor; top_k::Int=100)
+#     n_samples = size(outputs, 1)
+#     n_expressions = size(outputs, 2)
+    
+#     # Calculate mean squared errors
+#     sum_squared_errors = sum((outputs .- y).^2, dims=1)
+#     mean_squared_errors = sum_squared_errors ./ n_samples
+    
+#     # Handle invalid values
+#     mean_squared_errors = Array(mean_squared_errors)
+#     mean_squared_errors[isnan.(mean_squared_errors)] .= Inf32
+#     mean_squared_errors[isinf.(mean_squared_errors)] .= Inf32
+    
+#     # Find indices of top_k smallest MSEs
+#     sorted_indices = partialsortperm(vec(mean_squared_errors), 1:min(top_k, length(mean_squared_errors)))
+    
+#     return sorted_indices, mean_squared_errors[sorted_indices]
+# end
+
+function get_best_expr_and_MSE_topk(model::PSRN, X::THArrays.Tensor{Float32, 2}, Y::Vector{Float32}, n_top::Int, device_id::Int)
+    # Calculate MSE for all expressions
+    batch_size = size(X, 1)
+    Y = Float32.(Y) # for saving memory
+    # sum_squared_errors = Tensor(zeros((1, model.out_dim)))
+    sum_squared_errors = Tensor(zeros(Float32, (1, model.out_dim))) # for saving memory
+
+    sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
+    
+
+
+
+
+    # Compute sum of squared errors
+    for i in 1:batch_size
+        x_sliced = X[i:i, :]
+        x_sliced = to(x_sliced, CUDA(device_id))
+        H = PSRN_forward(model, x_sliced)
+        diff = H .- Y[i]
+        square = diff * diff # don't use ^2, because it will get Float64
+        sum_squared_errors += square
     end
-    return Array(x)
-end
+    
+    # Calculate mean
+    mean_errors = sum_squared_errors ./ batch_size
+    # mean_errors = reshape(mean_errors, :)
+    # @info "mean_errors shape: $(size(mean_errors))"
 
-function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=Int(100))
-    backend = outputs isa CUDA.CuArray ? CUDA : CPU
-    # println("to_device from ==> [find_best_indices]")
-    y_device = to_device(y, backend)
-    
-    # Calculate the MSE for each output with respect to the target value
-    n_samples = size(outputs, 1)
-    n_expressions = size(outputs, 2)
-    
-    # Initialize the error accumulator
-    sum_squared_errors = CUDA.zeros(eltype(outputs), n_expressions)
-    
-    # Calculate the MSE for each expression
-    for i in 1:n_samples
-        diff = outputs[i, :] .- y_device[i]
-        sum_squared_errors .+= diff .^ 2
-    end
-    mean_squared_errors = sum_squared_errors ./ n_samples
-    # @info "Mean squared errors before handling NaN/Inf" mean_squared_errors
-    
-    # Move the data back to the CPU for processing
-    mean_squared_errors_cpu = Array(mean_squared_errors)
-    
-    # Handle invalid values on the CPU
-    mean_squared_errors_cpu[isnan.(mean_squared_errors_cpu)] .= Inf32
-    mean_squared_errors_cpu[isinf.(mean_squared_errors_cpu)] .= Inf32
-    
-    # @info "Mean squared errors after handling NaN/Inf" mean_squared_errors_cpu
-    
-    # Find the indices of the top_k smallest MSEs
-    sorted_indices = partialsortperm(mean_squared_errors_cpu, 1:min(top_k, length(mean_squared_errors_cpu)))
-    
-    # Return the indices and corresponding MSE values
-    return sorted_indices, mean_squared_errors_cpu[sorted_indices]
-end
+    # Get top-k indices and values using THC
+    # values, indices = THC.topk(mean_errors, n_top, largest=false, sorted=true)
+    indices = topk_indices(mean_errors, n_top) + 1 # add 1 because the index is 0-based
 
-function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray, base_exprs::Any, options::Options; top_k::Int=100)
-    backend = get_preferred_backend()
-    # println("to_device from ==> [get_best_expressions]")
-    X_device = to_device(X, backend)
+    # Convert to CPU for processing
+    # MSE_min_ls = Array(values)
+    indices = Array(to(indices,CPU()))
 
-    outputs = forward(psrn, X_device)
-    
-    best_indices, mse_values = find_best_indices(outputs, y; top_k=Int(top_k))
-
-    # Process based on the type of initial_expressions
-    n_variables = size(X_device, 2)
-    variable_names = ["x$i" for i in 1:n_variables]
-    psrn.base_exprs = if isnothing(base_exprs)
-        # Variable expressions are used by default
-        [Expression(
-            Node(Float32; feature=i);
-            operators=options.operators,
-            variable_names=variable_names
-        ) for i in 1:n_variables]
-    elseif base_exprs isa Vector{Node}
-        # If it is a Node array, convert it to an Expression array
-        [Expression(
-            node;
-            operators=options.operators,
-            variable_names=variable_names
-        ) for node in base_exprs]
-    elseif base_exprs isa Vector{Expression}
-        # If it is already an Expression array, use it directly
-        base_exprs
-    else
-        throw(ArgumentError("base_exprs must be Nothing, Vector{Node}, or Vector{Expression}"))
+    # Get expressions for best indices
+    expr_best_ls = Expression[]
+    # @info "Generating best expressions..."
+    # @info "indices: $indices"
+    # @info "length of indices: $(length(indices))"
+    # @info "type of indices: $(typeof(indices))"
+    for i in indices
+        push!(expr_best_ls, get_expr(model, i))
     end
 
-    best_expressions = [get_expr(psrn, idx) for idx in best_indices]
-    
+    # Print results
     # println("Best expressions:")
     # println("-"^20)
-    for (expr, mse) in zip(best_expressions, mse_values)
-        # println("MSE: ", mse, " | Expression: ", expr)
-    end
+    # for expr in expr_best_ls
+        # println(expr)
+    # end
     # println("-"^20)
-    
-    return best_expressions, mse_values
+
+    return expr_best_ls
 end
 
-export PSRN, forward, get_expr, to_device, find_best_indices, get_best_expressions
+
+function get_expr(model::PSRN, index::Int)
+    return _get_expr(model, index, length(model.layers))
+end
+
+
+function _get_expr(model::PSRN, index::Int, layer_idx::Int)
+    # @info "\t\tGetting expression for index $index, layer_idx $layer_idx"
+    if layer_idx < 1
+        return model.current_expr_ls[index + 1]
+        # try
+        #     return model.current_expr_ls[index + 1]
+        # catch e
+        #     if isa(e, BoundsError)
+        #         @error "BoundsError: length of model.current_expr_ls is $(length(model.current_expr_ls)), however got index $index"
+        #         throw(e)
+        #     end
+        # end
+    end
+
+    layer = model.layers[layer_idx]
+    
+    if layer isa DRLayer
+        new_index = get_op_and_offset(layer, index)
+        return _get_expr(model, new_index, layer_idx-1)
+    else
+        op, offsets = get_op_and_offset(layer, index)
+        if op isa UnaryOperator
+            expr1 = _get_expr(model, offsets[1], layer_idx-1)
+            if op.name == "Identity"
+                return expr1
+            end
+            return op.expr_gen(expr1)
+        else
+            expr1 = _get_expr(model, offsets[1], layer_idx-1)
+            expr2 = _get_expr(model, offsets[2], layer_idx-1)
+            return op.expr_gen(expr1, expr2)
+        end
+    end
+end
+
+function Base.show(io::IO, model::PSRN)
+    print(io, "PSRN(n_variables=$(model.n_variables), operators=$(model.operators), " *
+              "n_layers=$(model.n_symbol_layers))\n")
+    print(io, "Layer dimensions: ")
+    print(io, join([layer.out_dim for layer in model.layers], " → "))
+end
+
+# Export types and functions
+export PSRN, SymbolLayer, DRLayer, Operator, UnaryOperator, BinaryOperator,
+       get_best_expr_and_MSE_topk, get_expr, get_op_and_offset
 
 end

@@ -164,8 +164,8 @@ using DynamicExpressions: with_type_parameters
     LogCoshLoss
 using DynamicDiff: D
 using Compat: @compat, Fix
-using CUDA
-using KernelAbstractions
+using THArrays
+
 
 #! format: off
 @compat(
@@ -327,7 +327,7 @@ using .TemplateExpressionModule: TemplateExpression, TemplateStructure, ValidVec
 using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
-import .PSRNmodel: PSRN, forward, get_expr, get_best_expressions
+import .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk
 
 
 
@@ -336,51 +336,6 @@ import .PSRNmodel: PSRN, forward, get_expr, get_best_expressions
     include("Configure.jl")
 end
 
-using KernelAbstractions
-using CUDA
-@static if Base.find_package("Metal") !== nothing
-    using Metal
-end
-@static if Base.find_package("AMDGPU") !== nothing
-    using AMDGPU
-end
-@static if Base.find_package("oneAPI") !== nothing
-    using oneAPI
-end
-
-const USE_CUDA = try
-    using CUDA
-    CUDA.functional()
-catch
-    false
-end
-
-const AVAILABLE_BACKENDS = Dict{Symbol,Any}()
-
-function __init__()
-    if USE_CUDA
-        AVAILABLE_BACKENDS[:cuda] = CUDABackend()
-    end
-    if @isdefined(Metal) && Metal.functional()
-        AVAILABLE_BACKENDS[:metal] = MetalBackend()
-    end
-    if @isdefined(AMDGPU) && AMDGPU.functional()
-        AVAILABLE_BACKENDS[:rocm] = ROCBackend()
-    end
-    if @isdefined(oneAPI) && oneAPI.functional()
-        AVAILABLE_BACKENDS[:oneapi] = oneBackend()
-    end
-    AVAILABLE_BACKENDS[:cpu] = CPU()
-end
-
-function get_preferred_backend()
-    for backend in [:cuda, :metal, :rocm, :oneapi, :cpu]
-        if haskey(AVAILABLE_BACKENDS, backend)
-            return AVAILABLE_BACKENDS[backend]
-        end
-    end
-    return AVAILABLE_BACKENDS[:cpu]
-end
 
 """
     equation_search(X, y[; kws...])
@@ -858,13 +813,14 @@ mutable struct PSRNManager
         operators::Vector{String},
         n_symbol_layers::Int,
         options::Options,
-        max_samples::Int=100
+        max_samples::Int=100 # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
     )
         psrn = PSRN(
             n_variables = N_PSRN_INPUT,
             operators = operators,
             n_symbol_layers = n_symbol_layers,
-            backend = CUDA.CUDABackend(),
+            dr_mask = nothing,
+            device = 0,
             options = options
         )
         
@@ -883,10 +839,10 @@ function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int, options::A
     filtered_subtrees = filter(pair -> begin
         node = pair.first
         complexity = compute_complexity(node, options)
-        return complexity <= 20
+        return complexity <= 20 # TODO the 20 can be tuned
     end, common_subtrees)
     
-    sorted_subtrees = sort(collect(filtered_subtrees), by=x->(x[2] * (1.0 + 0.3 * randn())), rev=true)
+    sorted_subtrees = sort(collect(filtered_subtrees), by=x->(x[2] * (1.0 + 0.3 * randn())), rev=true) # TODO the 0.3 can be tuned
     
     result = Node[]
     
@@ -895,7 +851,7 @@ function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int, options::A
     end
     
     while length(result) < n
-        current_num = (length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1
+        current_num = (length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1 # TODO for the rest of the slots, we use 1, -1, 2, -2, 3, -3, ...
         is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
         val = is_positive ? Float32(current_num) : Float32(-current_num)
         push!(result, Node(; val=val))
@@ -1024,18 +980,18 @@ function start_psrn_task(
     options::AbstractOptions,
     N_PSRN_INPUT::Int
 )
-    manager.call_count += 1
-
-    # Check if PSRN needs to be executed
-    # TODO - This is obviously not efficient, but it works for now
-    if manager.call_count % 1 != 0 || (manager.current_task !== nothing && !istaskdone(manager.current_task))
+    
+    
+    if manager.current_task !== nothing && !istaskdone(manager.current_task)
         return
     end
     
-    @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
+    
     
     manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
         try
+            manager.call_count += 1
+            @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
 
             common_subtrees = analyze_common_subtrees(dominating_trees)
 
@@ -1045,14 +1001,14 @@ function start_psrn_task(
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
             
-            # 添加降采样逻辑
+            # add downsampling 
             n_samples = size(X_mapped, 1)
             if n_samples > manager.max_samples
-                # 随机选择max_samples个样本点
+                # random sample
                 sample_indices = randperm(n_samples)[1:manager.max_samples]
                 X_mapped_sampled = X_mapped[sample_indices, :]
                 
-                # 检查 dataset.y 的维度
+                # check the dimension of dataset.y
                 y_dims = size(dataset.y)
                 if length(y_dims) == 1
                     y_sampled = dataset.y[sample_indices]
@@ -1065,16 +1021,48 @@ function start_psrn_task(
             end
 
 
-            # 添加调试信息
+            # add debug info
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
+            # to cuda 0
+            X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
+            X_mapped_sampled = Tensor(X_mapped_sampled)
+            device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
 
-            best_expressions, mse_values = get_best_expressions(
+            # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
+            # y_sampled = to(y_sampled, CUDA(0))
+
+            # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
+            n_variables = size(X_mapped_sampled, 2)
+            variable_names = ["x$i" for i in 1:n_variables]
+            manager.net.current_expr_ls = if isnothing(top_subtrees)
+                # Variable expressions are used by default
+                [Expression(
+                    Node(Float32; feature=i);
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for i in 1:n_variables]
+            elseif top_subtrees isa Vector{Node}
+                # If it is a Node array, convert it to an Expression array
+                [Expression(
+                    node;
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for node in top_subtrees]
+            elseif top_subtrees isa Vector{Expression}
+                # If it is already an Expression array, use it directly
+                top_subtrees
+            else
+                throw(ArgumentError("top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}"))
+            end
+
+
+
+            best_expressions = get_best_expr_and_MSE_topk(
                 manager.net, 
                 X_mapped_sampled,
                 y_sampled,
-                top_subtrees, 
-                options, 
-                top_k=100
+                100,
+                device_id
             )
 
             put!(manager.channel, best_expressions)
@@ -1090,6 +1078,11 @@ function start_psrn_task(
             Full stack:
             $(join(string.(bt), "\n"))
             """
+            # @error """
+            # PSRN task execution error:
+            # Error type: $(typeof(e))
+            # Error location: $(bt[1])
+            # """
         end
     end
 end
@@ -1149,16 +1142,27 @@ function _main_search_loop!(
     print_every_n_seconds = 5
     equation_speed = Float32[]
 
-    N_PSRN_INPUT = 10
-    psrn_manager = PSRNManager(
-        N_PSRN_INPUT = N_PSRN_INPUT,
-        operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-        # operators = ["Add", "Mul", "Sub", "Div", "Identity"],
-        n_symbol_layers = 2,
-        options = options,
-        max_samples = 100
-        # max_samples = 10
-    )
+    println(options)
+
+    if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
+        println("Use PSRN")
+        # N_PSRN_INPUT = 10
+        N_PSRN_INPUT = 15 # TODO this can be tuned
+
+        psrn_manager = PSRNManager(
+            N_PSRN_INPUT = N_PSRN_INPUT,            # these operators must be the subset of options.operators
+            operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
+            # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
+            # operators = ["Sub", "Div", "Identity"],
+            # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
+            n_symbol_layers = 2, # TODO if use 3 layer, easily crash (segfault), don't know why
+            options = options,
+            max_samples = 100
+            # max_samples = 10
+        )
+    else
+        println("Not use PSRN")
+    end
 
     if ropt.parallelism in (:multiprocessing, :multithreading)
         for j in 1:nout, i in 1:(options.populations)
@@ -1234,7 +1238,7 @@ function _main_search_loop!(
             
             dominating_trees = [member.tree for member in dominating]
 
-            if true # if use PSRN
+            if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
                 start_psrn_task(psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT)
                 process_psrn_results!(
                     psrn_manager,

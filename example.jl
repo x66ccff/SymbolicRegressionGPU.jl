@@ -1,13 +1,13 @@
 using SymbolicRegression
 
-X = randn(Float32, 5, 100)
+X = randn(Float32, 5, 3)
 y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
 
 options = SymbolicRegression.Options(;
-    binary_operators=[+, *, /, -], unary_operators=[cos, exp]
+    binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin]
 )
 
-hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)
+hall_of_fame = equation_search(X, y ;niterations=20000, options=options, parallelism=:multithreading)
 
 dominating = calculate_pareto_frontier(hall_of_fame)
 

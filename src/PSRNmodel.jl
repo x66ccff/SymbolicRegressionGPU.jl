@@ -10,6 +10,8 @@ import ..CoreModule: Options, Dataset
 using KernelAbstractions
 const KA = KernelAbstractions
 using CUDA
+using cuDNN
+using Flux
 
 @static if Base.find_package("AMDGPU") !== nothing
     using AMDGPU
@@ -166,15 +168,15 @@ function get_op_and_offset(layer::SymbolLayer, index::Int)
 end
 
 # Add a forward propagator
-function forward(layer::SymbolLayer, x::AbstractArray, backend)
+function forward(layer::SymbolLayer, x::AbstractArray, device)
     results = []
     
     for op in layer.operator_list
         if op isa UnaryOperator
             # Back end to get input data
-            device_backend = get_backend(x)
+            # device_backend = get_backend(x)
             # Create and execute the kernel
-            kernel = op.kernel(device_backend, 256)
+            kernel = op.kernel(device, 256)
             result = similar(x)
             event = kernel(result, x, ndrange=size(x))
             if event !== nothing
@@ -346,7 +348,7 @@ function forward(psrn::PSRN, x::AbstractArray{T}) where T
     # Forward propagation
     h = x
     for layer in psrn.layers
-        h = forward(layer, h, psrn.backend)
+        h = forward(layer, h, device)
     end
     return h
 end
@@ -467,18 +469,18 @@ function get_preferred_backend()
     return KernelAbstractions.CPU()
 end
 
-function to_device(x::AbstractArray, backend::Union{Module,KA.Backend})
-    if backend isa KA.GPU
-        if CUDA.functional()
-            return CuArray(x)
-        elseif @isdefined(AMDGPU) && AMDGPU.functional()
-            return ROCArray(x)
-        elseif @isdefined(oneAPI) && oneAPI.functional()
-            return oneArray(x)
-        end
-    end
-    return Array(x)
-end
+# function to_device(x::AbstractArray, backend::Union{Module,KA.Backend})
+#     if backend isa KA.GPU
+#         if CUDA.functional()
+#             return CuArray(x)
+#         elseif @isdefined(AMDGPU) && AMDGPU.functional()
+#             return ROCArray(x)
+#         elseif @isdefined(oneAPI) && oneAPI.functional()
+#             return oneArray(x)
+#         end
+#     end
+#     return Array(x)
+# end
 
 function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=Int(100))
     backend = outputs isa CUDA.CuArray ? CUDA : CPU
@@ -516,14 +518,23 @@ function find_best_indices(outputs::AbstractArray, y::AbstractArray; top_k::Int=
     return sorted_indices, mean_squared_errors_cpu[sorted_indices]
 end
 
-function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray, base_exprs::Any, options::Options; top_k::Int=100)
-    backend = get_preferred_backend()
-    # println("to_device from ==> [get_best_expressions]")
-    X_device = to_device(X, backend)
 
-    outputs = forward(psrn, X_device)
+# TODO NOTE =============================================================================================
+
+
+function get_best_expressions(psrn::PSRN, X::AbstractArray, y::AbstractArray, base_exprs::Any, options::Options; top_k::Int=100)
+    # backend = get_preferred_backend()
+    device = gpu_device()
+    # println("to_device from ==> [get_best_expressions]")
+    # X_device = to_device(X, device)
+    X_device = X |> device
+    y_device = y |> device
+
+    expr_best_ls, MSE_min_ls = get_best_expr_and_MSE_topk(psrn, X_device, y_device, top_k)
+
+    # outputs = forward(psrn, X_device)
     
-    best_indices, mse_values = find_best_indices(outputs, y; top_k=Int(top_k))
+    # best_indices, mse_values = find_best_indices(outputs, y; top_k=Int(top_k))
 
     # Process based on the type of initial_expressions
     n_variables = size(X_device, 2)

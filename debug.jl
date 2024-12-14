@@ -68,8 +68,10 @@
 
 ###################################################################
 
+
 # julia --project=. dev/debug.jl
 
+# export JULIA_DEBUG=loading
 # export JULIA_NUM_THREADS=4 #############<<<<<<<<<<<<<< set this !!!
 
 # 1. Set up the environment and paths
@@ -77,7 +79,7 @@ using Pkg
 Pkg.activate(@__DIR__)  # Activate the environment in the current directory
 
 # Add StatProfilerHTML for profiling
-using StatProfilerHTML
+# using StatProfilerHTML
 
 # Add the local source path to LOAD_PATH
 push!(LOAD_PATH, joinpath(@__DIR__, ".."))  # Add the parent directory (project root) to the path

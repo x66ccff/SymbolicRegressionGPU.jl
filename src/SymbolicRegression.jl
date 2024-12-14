@@ -165,8 +165,13 @@ using DynamicExpressions: with_type_parameters
     QuantileLoss,
     LogCoshLoss
 using Compat: @compat, Fix
+using Flux: gpu_device, gpu, cpu
+using cuDNN
 using CUDA
-using KernelAbstractions
+
+
+device = gpu_device()  # function to move data and model to the GPU
+println("device: ", device) # device: MLDataDevices.CUDADevice{Nothing}(nothing)
 
 #! format: off
 @compat(
@@ -226,8 +231,8 @@ using DispatchDoctor: @stable
     include("ComposableExpression.jl")
     include("TemplateExpression.jl")
     include("ParametricExpression.jl")
-    include("PSRNfunctions.jl")
-    include("PSRNmodel.jl")
+    include("PSRNfunctionsFlux.jl")
+    include("PSRNmodelFlux.jl")
 end
 
 using .CoreModule:
@@ -328,59 +333,13 @@ using .TemplateExpressionModule: TemplateExpression, TemplateStructure, ValidVec
 using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
-import .PSRNmodel: PSRN, forward, get_expr, get_best_expressions
+import .PSRNmodelFlux: PSRN, get_best_expr_and_MSE_topk
 
 
 
 @stable default_mode = "disable" begin
     include("deprecates.jl")
     include("Configure.jl")
-end
-
-using KernelAbstractions
-using CUDA
-@static if Base.find_package("Metal") !== nothing
-    using Metal
-end
-@static if Base.find_package("AMDGPU") !== nothing
-    using AMDGPU
-end
-@static if Base.find_package("oneAPI") !== nothing
-    using oneAPI
-end
-
-const USE_CUDA = try
-    using CUDA
-    CUDA.functional()
-catch
-    false
-end
-
-const AVAILABLE_BACKENDS = Dict{Symbol,Any}()
-
-function __init__()
-    if USE_CUDA
-        AVAILABLE_BACKENDS[:cuda] = CUDABackend()
-    end
-    if @isdefined(Metal) && Metal.functional()
-        AVAILABLE_BACKENDS[:metal] = MetalBackend()
-    end
-    if @isdefined(AMDGPU) && AMDGPU.functional()
-        AVAILABLE_BACKENDS[:rocm] = ROCBackend()
-    end
-    if @isdefined(oneAPI) && oneAPI.functional()
-        AVAILABLE_BACKENDS[:oneapi] = oneBackend()
-    end
-    AVAILABLE_BACKENDS[:cpu] = CPU()
-end
-
-function get_preferred_backend()
-    for backend in [:cuda, :metal, :rocm, :oneapi, :cpu]
-        if haskey(AVAILABLE_BACKENDS, backend)
-            return AVAILABLE_BACKENDS[backend]
-        end
-    end
-    return AVAILABLE_BACKENDS[:cpu]
 end
 
 """
@@ -510,7 +469,7 @@ function equation_search(
     extra::NamedTuple=NamedTuple(),
     v_dim_out::Val{DIM_OUT}=Val(nothing),
     # Deprecated:
-    multithreaded=nothing,
+    multithreaded=nothing
 ) where {T<:DATA_TYPE,L,DIM_OUT}
     if multithreaded !== nothing
         error(
@@ -853,21 +812,27 @@ mutable struct PSRNManager
     N_PSRN_INPUT::Int
     net::PSRN
     max_samples::Int
+    device::Any
     
     function PSRNManager(;
         N_PSRN_INPUT::Int,
         operators::Vector{String},
         n_symbol_layers::Int,
         options::Options,
-        max_samples::Int=100
+        max_samples::Int=100,
+        dr_mask=nothing,
+        device=gpu
     )
-        psrn = PSRN(
-            n_variables = N_PSRN_INPUT,
-            operators = operators,
-            n_symbol_layers = n_symbol_layers,
-            backend = CUDA.CUDABackend(),
-            options = options
+
+        psrn =  PSRN(
+            n_variables=N_PSRN_INPUT,
+            operators=operators,
+            n_symbol_layers=n_symbol_layers,
+            options = options,
+            dr_mask=dr_mask
         )
+
+        psrn |> device
         
         new(
             Channel{Vector{Expression}}(32),
@@ -1018,7 +983,7 @@ end
 get_subtrees(x::Number) = Node[]
 get_subtrees(x::Symbol) = Node[]
 
-function start_psrn_task(
+function start_psrn_task( 
     manager::PSRNManager,
     dominating_trees::Vector{<:Expression},
     dataset::Dataset,
@@ -1042,7 +1007,7 @@ function start_psrn_task(
 
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
 
-            # @info "Selected subtrees:" top_subtrees
+            @info "Selected subtrees:" top_subtrees
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
             
@@ -1069,20 +1034,48 @@ function start_psrn_task(
             # 添加调试信息
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
 
-            best_expressions, mse_values = get_best_expressions(
-                manager.net, 
-                X_mapped_sampled,
-                y_sampled,
-                top_subtrees, 
-                options, 
-                top_k=100
-            )
+            # TODO NOTE =============================================================================================
 
-            put!(manager.channel, best_expressions)
+            # best_expressions, mse_values = get_best_expressions( 
+            #     manager.net, 
+            #     X_mapped_sampled,
+            #     y_sampled,
+            #     top_subtrees, 
+            #     options, 
+            #     top_k=100
+            # )
+            # manager.net.current_expr_ls = top_subtrees
+            n_variables = size(X_mapped_sampled, 2)
+            variable_names = ["x$i" for i in 1:n_variables]
+            manager.net.current_expr_ls  = if isnothing(top_subtrees)
+                # Variable expressions are used by default
+                [Expression(
+                    Node(Float32; feature=i);
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for i in 1:n_variables]
+            elseif top_subtrees isa Vector{Node}
+                # If it is a Node array, convert it to an Expression array
+                [Expression(
+                    node;
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for node in top_subtrees]
+            elseif top_subtrees isa Vector{Expression}
+                # If it is already an Expression array, use it directly
+                top_subtrees
+            else
+                throw(ArgumentError("top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}"))
+            end
+
+            expr_best_ls, MSE_min_ls = get_best_expr_and_MSE_topk(manager.net, X_mapped_sampled, y_sampled, 10)
+
+            put!(manager.channel, expr_best_ls)
 
             # @info "best_expressions: $best_expressions"
         catch e
             bt = stacktrace(catch_backtrace())
+            # bt = "error"
             @error """
             PSRN task execution error:
             Error type: $(typeof(e))
@@ -1112,6 +1105,9 @@ function process_psrn_results!(
                     operators=nothing,  # Set to nothing
                     variable_names=nothing  # Set to nothing
                 )
+
+                @info "converted_expr: $converted_expr"
+                @info "type of converted_expr: $(typeof(converted_expr))"
                 
                 member = PopMember(dataset, converted_expr, options; deterministic=false)
                 # @info "PSRN member: $member"
@@ -1153,11 +1149,14 @@ function _main_search_loop!(
     N_PSRN_INPUT = 10
     psrn_manager = PSRNManager(
         N_PSRN_INPUT = N_PSRN_INPUT,
+        
+        # operators = ["Identity", "Cos", "Sin", "Exp", "Log"],
         operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-        # operators = ["Add", "Mul", "Sub", "Div", "Identity"],
+        #operators = ["Identity"],
         n_symbol_layers = 2,
         options = options,
-        max_samples = 100
+        max_samples = 100,
+        device = device
         # max_samples = 10
     )
 
@@ -1311,18 +1310,18 @@ function _main_search_loop!(
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
             move_window!(state.all_running_search_statistics[j])
-            if !isnothing(progress_bar)
-                head_node_occupation = estimate_work_fraction(resource_monitor)
-                update_progress_bar!(
-                    progress_bar,
-                    only(state.halls_of_fame),
-                    only(datasets),
-                    options,
-                    equation_speed,
-                    head_node_occupation,
-                    ropt.parallelism,
-                )
-            end
+            # if !isnothing(progress_bar)
+            #     head_node_occupation = estimate_work_fraction(resource_monitor)
+            #     update_progress_bar!(
+            #         progress_bar,
+            #         only(state.halls_of_fame),
+            #         only(datasets),
+            #         options,
+            #         equation_speed,
+            #         head_node_occupation,
+            #         ropt.parallelism,
+            #     )
+            # end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end
@@ -1523,11 +1522,12 @@ using .MLJInterfaceModule: SRRegressor, MultitargetSRRegressor
 # TODO: Hack to force ConstructionBase version
 using ConstructionBase: ConstructionBase as _
 
-include("precompile.jl")
-redirect_stdout(devnull) do
-    redirect_stderr(devnull) do
-        do_precompilation(Val(:precompile))
-    end
-end
+# TODO NOTE 暂时把预编译注释掉
+# include("precompile.jl")
+# redirect_stdout(devnull) do
+#     redirect_stderr(devnull) do
+#         do_precompilation(Val(:precompile))
+#     end
+# end
 
 end #module SR

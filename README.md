@@ -22,7 +22,7 @@ a Python frontend.
 
 ### 1. clone this repo
 
-### 2. download libtorch and then place them into `THArrays.jl/csrc`
+### 2. download libtorch and then unzip, place `libtorch` into `THArrays.jl/csrc`
 ```bash
 wget https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip
 ```
@@ -35,5 +35,11 @@ export THARRAYS_DEV=1
 (SymbolicRegression) pkg> dev ./THArrays.jl
 
 (SymbolicRegression) pkg> build THArrays
+```
+### 4. Run
+```
+export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
+
+julia --project=. example.jl
 ```
 

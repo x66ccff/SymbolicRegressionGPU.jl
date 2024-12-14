@@ -164,8 +164,8 @@ using DynamicExpressions: with_type_parameters
     LogCoshLoss
 using DynamicDiff: D
 using Compat: @compat, Fix
-using CUDA
-using KernelAbstractions
+using THArrays
+
 
 #! format: off
 @compat(
@@ -327,7 +327,7 @@ using .TemplateExpressionModule: TemplateExpression, TemplateStructure, ValidVec
 using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
-import .PSRNmodel: PSRN, forward, get_expr, get_best_expressions
+import .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk
 
 
 
@@ -336,51 +336,6 @@ import .PSRNmodel: PSRN, forward, get_expr, get_best_expressions
     include("Configure.jl")
 end
 
-using KernelAbstractions
-using CUDA
-@static if Base.find_package("Metal") !== nothing
-    using Metal
-end
-@static if Base.find_package("AMDGPU") !== nothing
-    using AMDGPU
-end
-@static if Base.find_package("oneAPI") !== nothing
-    using oneAPI
-end
-
-const USE_CUDA = try
-    using CUDA
-    CUDA.functional()
-catch
-    false
-end
-
-const AVAILABLE_BACKENDS = Dict{Symbol,Any}()
-
-function __init__()
-    if USE_CUDA
-        AVAILABLE_BACKENDS[:cuda] = CUDABackend()
-    end
-    if @isdefined(Metal) && Metal.functional()
-        AVAILABLE_BACKENDS[:metal] = MetalBackend()
-    end
-    if @isdefined(AMDGPU) && AMDGPU.functional()
-        AVAILABLE_BACKENDS[:rocm] = ROCBackend()
-    end
-    if @isdefined(oneAPI) && oneAPI.functional()
-        AVAILABLE_BACKENDS[:oneapi] = oneBackend()
-    end
-    AVAILABLE_BACKENDS[:cpu] = CPU()
-end
-
-function get_preferred_backend()
-    for backend in [:cuda, :metal, :rocm, :oneapi, :cpu]
-        if haskey(AVAILABLE_BACKENDS, backend)
-            return AVAILABLE_BACKENDS[backend]
-        end
-    end
-    return AVAILABLE_BACKENDS[:cpu]
-end
 
 """
     equation_search(X, y[; kws...])
@@ -864,7 +819,8 @@ mutable struct PSRNManager
             n_variables = N_PSRN_INPUT,
             operators = operators,
             n_symbol_layers = n_symbol_layers,
-            backend = CUDA.CUDABackend(),
+            dr_mask = nothing,
+            device = 0,
             options = options
         )
         
@@ -1028,6 +984,7 @@ function start_psrn_task(
 
     # Check if PSRN needs to be executed
     # TODO - This is obviously not efficient, but it works for now
+    
     if manager.call_count % 1 != 0 || (manager.current_task !== nothing && !istaskdone(manager.current_task))
         return
     end
@@ -1067,14 +1024,45 @@ function start_psrn_task(
 
             # 添加调试信息
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
+            # to cuda 0
+            X_mapped_sampled = Tensor(X_mapped_sampled)
+            device_id = 0
 
-            best_expressions, mse_values = get_best_expressions(
+            # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
+            # y_sampled = to(y_sampled, CUDA(0))
+
+            # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
+            n_variables = size(X_mapped_sampled, 2)
+            variable_names = ["x$i" for i in 1:n_variables]
+            manager.net.current_expr_ls = if isnothing(top_subtrees)
+                # Variable expressions are used by default
+                [Expression(
+                    Node(Float32; feature=i);
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for i in 1:n_variables]
+            elseif top_subtrees isa Vector{Node}
+                # If it is a Node array, convert it to an Expression array
+                [Expression(
+                    node;
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for node in top_subtrees]
+            elseif top_subtrees isa Vector{Expression}
+                # If it is already an Expression array, use it directly
+                top_subtrees
+            else
+                throw(ArgumentError("top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}"))
+            end
+
+
+
+            best_expressions = get_best_expr_and_MSE_topk(
                 manager.net, 
                 X_mapped_sampled,
                 y_sampled,
-                top_subtrees, 
-                options, 
-                top_k=100
+                100,
+                device_id
             )
 
             put!(manager.channel, best_expressions)
@@ -1090,6 +1078,11 @@ function start_psrn_task(
             Full stack:
             $(join(string.(bt), "\n"))
             """
+            # @error """
+            # PSRN task execution error:
+            # Error type: $(typeof(e))
+            # Error location: $(bt[1])
+            # """
         end
     end
 end
@@ -1152,7 +1145,9 @@ function _main_search_loop!(
     N_PSRN_INPUT = 10
     psrn_manager = PSRNManager(
         N_PSRN_INPUT = N_PSRN_INPUT,
-        operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
+        # operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
+        operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
+        # operators = ["Sub", "Div", "Identity"],
         # operators = ["Add", "Mul", "Sub", "Div", "Identity"],
         n_symbol_layers = 2,
         options = options,

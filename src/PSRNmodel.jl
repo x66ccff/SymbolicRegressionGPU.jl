@@ -35,11 +35,13 @@ const OPERATORS = Dict{String, Operator}(
     "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
     "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
     "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
-    "Neg" => UnaryOperator("Neg", neg_kernel!, true, neg),
+    
     "Add" => BinaryOperator("Add", add_kernel!, false, +),
     "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
     "Div" => BinaryOperator("Div", div_kernel!, true, /),
-    "Sub" => BinaryOperator("Sub", sub_kernel!, true, -)
+    "Sub" => BinaryOperator("Sub", sub_kernel!, true, -),
+    "Inv" => UnaryOperator("Inv", inv_kernel!, true, x -> 1 / x),
+    "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> -x)
 )
 
 

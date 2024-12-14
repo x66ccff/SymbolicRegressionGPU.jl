@@ -1145,15 +1145,17 @@ function _main_search_loop!(
 
     println(options)
 
-    if options.populations > 0 # TODO <=3 means you are using pre-compilation, so do not use PSRN
+    if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
-        N_PSRN_INPUT = 10
+        # N_PSRN_INPUT = 10
+        N_PSRN_INPUT = 15
+
         psrn_manager = PSRNManager(
             N_PSRN_INPUT = N_PSRN_INPUT,
             operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Sub", "Div", "Identity"],
-            # operators = ["Add", "Mul", "Sub", "Div", "Identity"],
+            # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
             n_symbol_layers = 2,
             options = options,
             max_samples = 100
@@ -1237,7 +1239,7 @@ function _main_search_loop!(
             
             dominating_trees = [member.tree for member in dominating]
 
-            if options.populations > 0 # TODO it means you are using pre-compilation, so do not use PSRN
+            if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
                 start_psrn_task(psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT)
                 process_psrn_results!(
                     psrn_manager,

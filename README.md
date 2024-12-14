@@ -1,5 +1,5 @@
 <!-- prettier-ignore-start -->
-<div align="center">
+
 
 SymbolicRegression.jl searches for symbolic expressions which optimize a particular objective.
 
@@ -16,3 +16,24 @@ SymbolicRegression.jl searches for symbolic expressions which optimize a particu
 Check out [PySR](https://github.com/MilesCranmer/PySR) for
 a Python frontend.
 [Cite this software](https://arxiv.org/abs/2305.01582)
+
+
+# How to use SymbolicRegressionGPU.jl?
+
+### 1. clone this repo
+
+### 2. download libtorch and then place them into `THArrays.jl/csrc`
+```bash
+wget https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip
+```
+### 3. install THArrays
+see https://github.com/compintell/THArrays.jl/
+
+```
+export THARRAYS_DEV=1
+
+(SymbolicRegression) pkg> dev ./THArrays.jl
+
+(SymbolicRegression) pkg> build THArrays
+```
+

@@ -413,9 +413,23 @@ function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::AbstractArray, n_
     return expr_best_ls
 end
 
-function get_expr(model::PSRN, index::Int)
-    return _get_expr(model, index, length(model.layers))
-end # ??
+# function get_expr(model::PSRN, index::Int)
+#     return _get_expr(model, index, length(model.layers))
+# end 
+# ?? this redifinition is necessary!!! because this can prevent pre-compilation!! 
+# and pre-compilation will cause torchscirpt-related error:
+
+# concat_tensors at /home/kent/_Project/PTSjl/PTS.jl/src/PSRNmodel.jl:72
+# forward at /home/kent/_Project/PTSjl/PTS.jl/src/PSRNmodel.jl:289
+# jfptr_forward_36217 at /home/kent/.julia/compiled/v1.11/SymbolicRegression/X2eIS_Ancfa.so (unknown line)
+# PSRN_forward at /home/kent/_Project/PTSjl/PTS.jl/src/PSRNmodel.jl:337
+# jfptr_PSRN_forward_36289 at /home/kent/.julia/compiled/v1.11/SymbolicRegression/X2eIS_Ancfa.so (unknown line)
+# get_best_expr_and_MSE_topk at /home/kent/_Project/PTSjl/PTS.jl/src/PSRNmodel.jl:375
+# #64 at /home/kent/_Project/PTSjl/PTS.jl/src/SymbolicRegression.jl:1060
+# jfptr_YY.64_37326 at /home/kent/.julia/compiled/v1.11/SymbolicRegression/X2eIS_Ancfa.so (unknown line)
+# jl_apply at /cache/build/builder-demeter6-6/julialang/julia-master/src/julia.h:2157 [inlined]
+# start_task at /cache/build/builder-demeter6-6/julialang/julia-master/src/task.c:1202
+# Allocations: 12112391 (Pool: 12112019; Big: 372); GC: 23
 
 
 function get_expr(model::PSRN, index::Int)

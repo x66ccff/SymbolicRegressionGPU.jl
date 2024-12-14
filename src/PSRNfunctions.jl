@@ -1,4 +1,6 @@
+__precompile__(false)
 module PSRNfunctions
+
 
 using THArrays
 
@@ -116,47 +118,11 @@ function mul_kernel!(x::Tensor)
 end
 
 function div_kernel!(x::Tensor)
-    batch_size = size(x, 1)
-    in_dim = size(x, 2)
-    
-    # num: (batch_size, in_dim, 1)
-    num = THC._reshape_alias(x, 
-        [batch_size, in_dim, 1], 
-        [in_dim, 1, 1])
-    
-    # deno: (batch_size, 1, in_dim)
-    deno = THC._reshape_alias(x, 
-        [batch_size, 1, in_dim], 
-        [in_dim, in_dim, 1])
-    
-    # out_temp: (batch_size, in_dim * in_dim)
-    out = THC._reshape_alias(num ./ deno, 
-        [batch_size, in_dim * in_dim],
-        [in_dim * in_dim, 1])
-    
-    return out
+    return broadcast_div(x)
 end
 
 function sub_kernel!(x::Tensor)
-    batch_size = size(x, 1)
-    in_dim = size(x, 2)
-    # num: (batch_size, in_dim, 1)
-    num = THC._reshape_alias(x, 
-        Int64[batch_size, in_dim, 1], 
-        Int64[in_dim, 1, 1])
-    
-    # deno: (batch_size, 1, in_dim)
-    deno = THC._reshape_alias(x, 
-        Int64[batch_size, 1, in_dim], 
-        Int64[in_dim, in_dim, 1])
-    
-    diff = num .- deno
-    # out_temp: (batch_size, in_dim * in_dim)
-    out = THC._reshape_alias(diff, 
-        Int64[batch_size, in_dim * in_dim],
-        Int64[in_dim * in_dim, 1])
-    
-    return out
+    return broadcast_sub(x)
 end
 
 # Export functions

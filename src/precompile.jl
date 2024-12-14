@@ -1,5 +1,5 @@
 using PrecompileTools: @compile_workload, @setup_workload
-using THArrays
+# using THArrays
 macro maybe_setup_workload(mode, ex)
     precompile_ex = Expr(
         :macrocall, Symbol("@setup_workload"), LineNumberNode(@__LINE__), ex
@@ -60,13 +60,47 @@ function _precompile_psrn_evaluation()
                 options = options
             )
             X_mapped = Tensor(X_mapped)
-            y = Tensor(y)
 
-            # to cuda 0
-            X_mapped = to(X_mapped, CUDA(0))
-            y = to(y, CUDA(0))
-            # best_expressions, mse_values = get_best_expressions(psrn, X_mapped, y, trees, options, top_k=100)
-            best_expressions, mse_values = get_best_expr_and_MSE_topk(psrn, X_mapped, y, 100)
+
+
+            device_id = 0
+
+            # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
+            n_variables = size(X_mapped, 2)
+            variable_names = ["x$i" for i in 1:n_variables]
+            psrn.current_expr_ls = if isnothing(trees)
+                # Variable expressions are used by default
+                [Expression(
+                    Node(Float32; feature=i);
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for i in 1:n_variables]
+            elseif trees isa Vector{Node}
+                # If it is a Node array, convert it to an Expression array
+                [Expression(
+                    node;
+                    operators=options.operators,
+                    variable_names=variable_names
+                ) for node in trees]
+            elseif trees isa Vector{Expression}
+                # If it is already an Expression array, use it directly
+                trees
+            else
+                throw(ArgumentError("trees must be Nothing, Vector{Node}, or Vector{Expression}"))
+            end
+
+
+
+            best_expressions = get_best_expr_and_MSE_topk(
+                psrn, 
+                X_mapped,
+                y,
+                100,
+                device_id
+            )
+
+
+
         end
     end
 end

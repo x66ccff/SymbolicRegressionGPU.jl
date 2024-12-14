@@ -1142,18 +1142,25 @@ function _main_search_loop!(
     print_every_n_seconds = 5
     equation_speed = Float32[]
 
-    N_PSRN_INPUT = 10
-    psrn_manager = PSRNManager(
-        N_PSRN_INPUT = N_PSRN_INPUT,
-        # operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-        operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-        # operators = ["Sub", "Div", "Identity"],
-        # operators = ["Add", "Mul", "Sub", "Div", "Identity"],
-        n_symbol_layers = 2,
-        options = options,
-        max_samples = 100
-        # max_samples = 10
-    )
+    println(options)
+
+    if options.populations > 0 # TODO <=3 means you are using pre-compilation, so do not use PSRN
+        println("Use PSRN")
+        N_PSRN_INPUT = 10
+        psrn_manager = PSRNManager(
+            N_PSRN_INPUT = N_PSRN_INPUT,
+            operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
+            # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
+            # operators = ["Sub", "Div", "Identity"],
+            # operators = ["Add", "Mul", "Sub", "Div", "Identity"],
+            n_symbol_layers = 2,
+            options = options,
+            max_samples = 100
+            # max_samples = 10
+        )
+    else
+        println("Not use PSRN")
+    end
 
     if ropt.parallelism in (:multiprocessing, :multithreading)
         for j in 1:nout, i in 1:(options.populations)
@@ -1229,7 +1236,7 @@ function _main_search_loop!(
             
             dominating_trees = [member.tree for member in dominating]
 
-            if true # if use PSRN
+            if options.populations > 0 # TODO it means you are using pre-compilation, so do not use PSRN
                 start_psrn_task(psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT)
                 process_psrn_results!(
                     psrn_manager,

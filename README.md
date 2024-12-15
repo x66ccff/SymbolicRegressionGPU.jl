@@ -1,6 +1,6 @@
 # 🚀 SymbolicRegressionGPU.jl 
 
-💻 [PSRN](https://github.com/intell-sci-comput/PTS) (Parallel Symbolic Regression Network) enhanced SymbolicRegression.jl for fast, large-scale parallel symbolic evaluations on GPUs. Based on SymbolicRegression.jl 
+💻 [PSRN](https://github.com/intell-sci-comput/PTS) (Parallel Symbolic Regression Network) enhanced SymbolicRegression.jl for **faster**, large-scale parallel symbolic evaluations on GPUs. _Based on [SymbolicRegression.jl](https://github.com/MilesCranmer/SymbolicRegression.jl)_.
 
 <!-- prettier-ignore-start -->
 

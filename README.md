@@ -56,7 +56,7 @@ To cite this fork SymbolicRegressionGPU.jl, please use the following BibTeX entr
   },
   title = {SymbolicRegressionGPU.jl},
   howpublished = {\url{https://github.com/x66ccff/SymbolicRegressionGPU.jl}},
-  year = {2020},
+  year = {2024},
 }
 ```
 

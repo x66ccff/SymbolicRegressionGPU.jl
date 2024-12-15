@@ -2,7 +2,6 @@ using THArrays
 using Test
 
 @testset "Simple TorchScript" begin
-
     @testset "Run simple method" begin
         script = """
 def main(a, b):

@@ -2,7 +2,6 @@ using THArrays
 using Test
 
 @testset "Tensor Indexing" begin
-
     j_vect = rand(10)
     t_vect = Tensor(j_vect)
     j_data = rand(2, 3, 4)

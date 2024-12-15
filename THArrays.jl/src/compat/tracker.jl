@@ -5,22 +5,23 @@ using ..THArrays
 using Tracker
 using Tracker: Tracked, Call, data, track
 
-
 ## Tensor
-THArrays.Tensor(x::Tracker.TrackedArray) = Tensor(data(x), requires_grad=true)
+THArrays.Tensor(x::Tracker.TrackedArray) = Tensor(data(x); requires_grad=true)
 
 ## TrackedTensor
-struct TrackedTensor{T, N} <: AbstractArray{T, N}
-    tracker::Tracked{Tensor{T, N}}
-    data::Tensor{T, N}
-    grad::Tensor{T, N}
+struct TrackedTensor{T,N} <: AbstractArray{T,N}
+    tracker::Tracked{Tensor{T,N}}
+    data::Tensor{T,N}
+    grad::Tensor{T,N}
 
-    TrackedTensor{T, N}(
-        t::Tracked{Tensor{T, N}},
-        data::Tensor{T, N}) where {T, N} = new(t, data)
-    TrackedTensor{T, N}(
-        t::Tracked{Tensor{T, N}},
-        data::Tensor{T, N}, grad::Tensor{T, N}) where {T, N} = new(t, data, grad)
+    function TrackedTensor{T,N}(t::Tracked{Tensor{T,N}}, data::Tensor{T,N}) where {T,N}
+        return new(t, data)
+    end
+    function TrackedTensor{T,N}(
+        t::Tracked{Tensor{T,N}}, data::Tensor{T,N}, grad::Tensor{T,N}
+    ) where {T,N}
+        return new(t, data, grad)
+    end
 end
 
 Tracker.data(x::TrackedTensor) = x.data
@@ -28,28 +29,29 @@ Tracker.tracker(x::TrackedTensor) = x.tracker
 Tracker.track(c::Tracker.Call, x::Tensor) = TrackedTensor(c, x)
 Tracker.track(c::Tracker.Call, x::TrackedTensor) = TrackedTensor(c, data(x))
 
-function TrackedTensor(c::Tracker.Call, t::Tensor{T, N}) where {T, N}
-    TrackedTensor{T, N}(Tracker.Tracked{Tensor{T, N}}(c), t)
+function TrackedTensor(c::Tracker.Call, t::Tensor{T,N}) where {T,N}
+    return TrackedTensor{T,N}(Tracker.Tracked{Tensor{T,N}}(c), t)
 end
 
-function TrackedTensor(c::Tracker.Call, t::Tensor{T, N}, d::Tensor{T, N}) where {T, N}
-    TrackedTensor{T, N}(Tracker.Tracked{Tensor{T, N}}(c, d), t, d)
+function TrackedTensor(c::Tracker.Call, t::Tensor{T,N}, d::Tensor{T,N}) where {T,N}
+    return TrackedTensor{T,N}(Tracker.Tracked{Tensor{T,N}}(c, d), t, d)
 end
 
 function TrackedTensor(t::Tensor)
-    TrackedTensor(Tracker.Call(), t, THC.zeros_like(t))
+    return TrackedTensor(Tracker.Call(), t, THC.zeros_like(t))
 end
 
-Base.eltype(x::Type{<:TrackedTensor{T}}) where T <: Real = TrackedTensor{T, 0}
+Base.eltype(x::Type{<:TrackedTensor{T}}) where {T<:Real} = TrackedTensor{T,0}
 
 function Base.show(io::IO, x::TrackedTensor)
-  show(io, data(x))
-  print(io, "(tracked Tensor)")
+    show(io, data(x))
+    return print(io, "(tracked Tensor)")
 end
 
 Base.copy(x::TrackedTensor) = x
-Base.setindex!(xs::TrackedTensor, v, i...; kwargs...) =
-    error("Can't differentiate `setindex!`")
+function Base.setindex!(xs::TrackedTensor, v, i...; kwargs...)
+    return error("Can't differentiate `setindex!`")
+end
 
 ## Fallthrough methods
 for f in :[Base.size, Base.ndims, Base.collect].args
@@ -92,52 +94,54 @@ Tracker.collectmemaybe(x::TrackedTensor) = _tr(x)
 ## Switches
 _th(x) = track(_th, x)
 Tracker.@grad function _th(x)
-    r = TrackedTensor(Tensor(x, requires_grad=true))
-    r, (d) -> begin
+    r = TrackedTensor(Tensor(x; requires_grad=true))
+    return r, (d) -> begin
         (THC.ones_like(data(r)) .* d,)
     end
 end
 
 _th(x::Tracker.TrackedArray) = track(_th, x)
 Tracker.@grad function _th(x::Tracker.TrackedArray)
-    r = TrackedTensor(Tensor(data(x), requires_grad=true))
-    r, (d) -> begin
+    r = TrackedTensor(Tensor(data(x); requires_grad=true))
+    return r, (d) -> begin
         (THC.ones_like(data(r)) .* d,)
     end
 end
 
 _tr(x) = track(_tr, x)
 Tracker.@grad function _tr(x)
-    x, (d) -> begin
+    return x, (d) -> begin
         (ones(size(x)) .* d,)
     end
 end
 
-_tr(x::TrackedTensor{T, 0}) where {T} = track(_tr, x)
-Tracker.@grad function _tr(x::TrackedTensor{T, 0}) where {T}
+_tr(x::TrackedTensor{T,0}) where {T} = track(_tr, x)
+Tracker.@grad function _tr(x::TrackedTensor{T,0}) where {T}
     r = convert(T, data(x))
-    r, (d) -> begin
+    return r, (d) -> begin
         THAD.backward(data(x), Tensor(float(d)))
         (float(d),)
     end
 end
 
-_tr(x::TrackedTensor{T, N}) where {T, N} = track(_tr, x)
-Tracker.@grad function _tr(x::TrackedTensor{T, N}) where {T, N}
+_tr(x::TrackedTensor{T,N}) where {T,N} = track(_tr, x)
+Tracker.@grad function _tr(x::TrackedTensor{T,N}) where {T,N}
     r = convert(Array, data(x))
-    r, (d) -> begin
+    return r, (d) -> begin
         THAD.backward(data(x), Tensor(d))
         (ones(size(r)) .* d,)
     end
 end
 
-
 ## Methods and Grads
 
-Base.Broadcast.broadcasted(f, t::TrackedTensor, args...) = track(Base.Broadcast.broadcasted, f, t, args...)
+function Base.Broadcast.broadcasted(f, t::TrackedTensor, args...)
+    return track(Base.Broadcast.broadcasted, f, t, args...)
+end
 Tracker.@grad function Base.Broadcast.broadcasted(f, t::TrackedTensor, args...)
     r = Base.Broadcast.broadcasted(f, data(t), data.(args)...)
-    r, (d) -> begin
+    return r,
+    (d) -> begin
         grads = map(args) do arg
             (arg isa TrackedTensor) ? THAD.get_grad(data(arg), d) : nothing
         end
@@ -146,20 +150,26 @@ Tracker.@grad function Base.Broadcast.broadcasted(f, t::TrackedTensor, args...)
 end
 
 macro grad_for_tensor(name)
-    esc(quote
-        $name(t::TrackedTensor, args...) = track($name, t, args...)
-        Tracker.@grad function $name(t::TrackedTensor, args...)
-            r = $name(data(t), data.(args)...)
-            r, (d) -> begin
-                grads = map(args) do arg
-                    (arg isa TrackedTensor) ? THAD.get_grad(data(arg), d) : nothing
+    esc(
+        quote
+            $name(t::TrackedTensor, args...) = track($name, t, args...)
+            Tracker.@grad function $name(t::TrackedTensor, args...)
+                r = $name(data(t), data.(args)...)
+                return r,
+                (d) -> begin
+                    grads = map(args) do arg
+                        if (arg isa TrackedTensor)
+                            THAD.get_grad(data(arg), d)
+                        else
+                            nothing
+                        end
+                    end
+                    (THAD.get_grad(data(t), d), grads...)
                 end
-                (THAD.get_grad(data(t), d), grads...)
             end
-        end
-        end)
+        end,
+    )
 end
-
 
 #
 # Methods in src/thc/thc.jl, can be extracted by the command:
@@ -167,22 +177,71 @@ end
 #   'if(m/import (Base\..*)/){ $i++; print "$1, "; print "\n" unless $i % 5;}' \
 #   src/thc/thc.jl
 #
-for name in :[Base.abs, Base.acos, Base.all, Base.angle, Base.any,
-              Base.argmax, Base.argmin, Base.asin, Base.atan, Base.cat,
-              Base.ceil, Base.clamp, Base.clamp!, Base.coalesce, Base.conj,
-              Base.cos, Base.cosh, Base.cumprod, Base.cumsum, Base.detach,
-              Base.empty, Base.exp, Base.expm1, Base.fill!, Base.floor,
-              Base.imag, Base.isfinite, Base.isnan, Base.log, Base.log10,
-              Base.log1p, Base.log2, Base.max, Base.min, Base.mv,
-              Base.ones, Base.prod, Base.put!, Base.rand, Base.randn,
-              Base.range, Base.real, Base.repeat, Base.reshape, Base.resize!,
-              Base.round, Base.sign, Base.sin, Base.sinh, Base.sort,
-              Base.split, Base.sqrt, Base.sum, Base.tan, Base.tanh,
-              Base.transpose, Base.trunc, Base.values, Base.view, Base.zeros,
-              ].args
+for name in
+    :[
+    Base.abs,
+    Base.acos,
+    Base.all,
+    Base.angle,
+    Base.any,
+    Base.argmax,
+    Base.argmin,
+    Base.asin,
+    Base.atan,
+    Base.cat,
+    Base.ceil,
+    Base.clamp,
+    Base.clamp!,
+    Base.coalesce,
+    Base.conj,
+    Base.cos,
+    Base.cosh,
+    Base.cumprod,
+    Base.cumsum,
+    Base.detach,
+    Base.empty,
+    Base.exp,
+    Base.expm1,
+    Base.fill!,
+    Base.floor,
+    Base.imag,
+    Base.isfinite,
+    Base.isnan,
+    Base.log,
+    Base.log10,
+    Base.log1p,
+    Base.log2,
+    Base.max,
+    Base.min,
+    Base.mv,
+    Base.ones,
+    Base.prod,
+    Base.put!,
+    Base.rand,
+    Base.randn,
+    Base.range,
+    Base.real,
+    Base.repeat,
+    Base.reshape,
+    Base.resize!,
+    Base.round,
+    Base.sign,
+    Base.sin,
+    Base.sinh,
+    Base.sort,
+    Base.split,
+    Base.sqrt,
+    Base.sum,
+    Base.tan,
+    Base.tanh,
+    Base.transpose,
+    Base.trunc,
+    Base.values,
+    Base.view,
+    Base.zeros,
+].args
     @eval @grad_for_tensor($name)
 end
-
 
 #
 # Methods in src/tensor.jl
@@ -194,10 +253,8 @@ end
 #
 # Methods in src/common-methods.jl
 #
-for name in :[Base.:+, Base.:-, Base.:*, Base.:/, Base.div, Base.:^,
-              Base.adjoint,].args
+for name in :[Base.:+, Base.:-, Base.:*, Base.:/, Base.div, Base.:^, Base.adjoint].args
     @eval @grad_for_tensor($name)
 end
-
 
 end

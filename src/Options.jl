@@ -610,7 +610,6 @@ $(OPTION_DESCRIPTIONS)
     recorder_file::AbstractString="pysr_recorder.json",
     ### Not search options; just construction options:
     define_helper_functions::Bool=true,
-
     use_psrn::Bool=false,
 
     #########################################

@@ -43,3 +43,18 @@ export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
 julia --project=. example.jl
 ```
 
+# Cite this Fork
+
+```bibtex
+@misc{SymbolicRegressionGPU.jl,
+  author = {
+    Ruan, Kai AND
+    Cranmer, Miles AND
+    Sun, Hao
+  },
+  title = {SymbolicRegressionGPU.jl},
+  howpublished = {\url{https://github.com/x66ccff/SymbolicRegressionGPU.jl}},
+  year = {2020},
+}
+```
+

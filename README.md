@@ -54,8 +54,6 @@ To cite this fork SymbolicRegressionGPU.jl, please use the following BibTeX entr
 }
 ```
 
-To cite SymbolicRegression.jl or PySR, please use the following BibTeX entry:
-
 ```bibtex
 @misc{cranmerInterpretableMachineLearning2023,
     title = {Interpretable {Machine} {Learning} for {Science} with {PySR} and {SymbolicRegression}.jl},

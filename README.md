@@ -77,17 +77,3 @@ To cite SymbolicRegression.jl or PySR, please use the following BibTeX entry:
 }
 ```
 
-To cite symbolic distillation of neural networks, the following BibTeX entry can be used:
-
-```bibtex
-@article{cranmerDiscovering2020,
-    title={Discovering Symbolic Models from Deep Learning with Inductive Biases},
-    author={Miles Cranmer and Alvaro Sanchez-Gonzalez and Peter Battaglia and Rui Xu and Kyle Cranmer and David Spergel and Shirley Ho},
-    journal={NeurIPS 2020},
-    year={2020},
-    eprint={2006.11287},
-    archivePrefix={arXiv},
-    primaryClass={cs.LG}
-}
-```
-

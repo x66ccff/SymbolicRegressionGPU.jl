@@ -21,13 +21,21 @@ SymbolicRegression.jl docs:
 wget https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip
 ```
 ### 🔧 3. install THArrays 
-see https://github.com/compintell/THArrays.jl/
+see https://github.com/compintell/THArrays.jl/ for more details
 
-```
+1. Go to the project directory where THArrays.jl is located
+2. Set the development environment variable:
+```bash
 export THARRAYS_DEV=1
-
+```
+3. Enter Julia REPL and activate the project environment:
+```julia
+julia> ]
+(@v1.x) pkg> activate SymbolicRegression
+```
+4. Install and build THArrays:
+```julia
 (SymbolicRegression) pkg> dev ./THArrays.jl
-
 (SymbolicRegression) pkg> build THArrays
 ```
 ### 🏃‍♂️ 4. Run 

@@ -54,9 +54,9 @@ To cite this fork SymbolicRegressionGPU.jl, please use the following BibTeX entr
     Cranmer, Miles AND
     Sun, Hao
   },
-  title = {SymbolicRegressionGPU.jl},
-  howpublished = {\url{https://github.com/x66ccff/SymbolicRegressionGPU.jl}},
+  title = {SymbolicRegressionGPU.jl}, 
   year = {2024},
+  url = {https://github.com/x66ccff/SymbolicRegressionGPU.jl}
 }
 ```
 

@@ -1023,6 +1023,7 @@ function start_psrn_task(
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
             # to cuda 0
             X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
+            y_sampled = Float32.(y_sampled) # for saving memory
             X_mapped_sampled = Tensor(X_mapped_sampled)
             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
 

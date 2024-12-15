@@ -4,8 +4,12 @@ using SymbolicRegression
 
 function main()
     X = randn(Float32, 5, 100)
+    # X = randn(Float64, 5, 101) # test for Float64, passed
+    # X = randn(Float64, 5, 10100) # test for PSRN downsampling, passed
+
+
     # y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
-    y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2
+    y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
 
     options = SymbolicRegression.Options(;
         binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin]

@@ -81,7 +81,6 @@ export Population,
     erf,
     erfc,
     atanh_clip,
-
     PSRNManager,
     start_psrn_task,
     process_psrn_results!
@@ -165,7 +164,6 @@ using DynamicExpressions: with_type_parameters
 using DynamicDiff: D
 using Compat: @compat, Fix
 using THArrays
-
 
 #! format: off
 @compat(
@@ -329,13 +327,10 @@ using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
 import .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk
 
-
-
 @stable default_mode = "disable" begin
     include("deprecates.jl")
     include("Configure.jl")
 end
-
 
 """
     equation_search(X, y[; kws...])
@@ -799,7 +794,6 @@ function _warmup_search!(
     return nothing
 end
 
-
 mutable struct PSRNManager
     channel::Channel{Vector{Expression}}
     current_task::Union{Task,Nothing}
@@ -807,67 +801,70 @@ mutable struct PSRNManager
     N_PSRN_INPUT::Int
     net::PSRN
     max_samples::Int
-    
+
     function PSRNManager(;
         N_PSRN_INPUT::Int,
         operators::Vector{String},
         n_symbol_layers::Int,
         options::Options,
-        max_samples::Int=100 # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
+        max_samples::Int=100, # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
     )
-        psrn = PSRN(
-            n_variables = N_PSRN_INPUT,
-            operators = operators,
-            n_symbol_layers = n_symbol_layers,
-            dr_mask = nothing,
-            device = 0,
-            options = options
+        psrn = PSRN(;
+            n_variables=N_PSRN_INPUT,
+            operators=operators,
+            n_symbol_layers=n_symbol_layers,
+            dr_mask=nothing,
+            device=0,
+            options=options,
         )
-        
-        new(
-            Channel{Vector{Expression}}(32),
-            nothing,
-            0,
-            N_PSRN_INPUT,
-            psrn,
-            max_samples
+
+        return new(
+            Channel{Vector{Expression}}(32), nothing, 0, N_PSRN_INPUT, psrn, max_samples
         )
     end
 end
 
-function select_top_subtrees(common_subtrees::Dict{Node,Int}, n::Int, options::AbstractOptions)
-    filtered_subtrees = filter(pair -> begin
-        node = pair.first
-        complexity = compute_complexity(node, options)
-        return complexity <= 20 # TODO the 20 can be tuned
-    end, common_subtrees)
-    
-    sorted_subtrees = sort(collect(filtered_subtrees), by=x->(x[2] * (1.0 + 0.3 * randn())), rev=true) # TODO the 0.3 can be tuned
-    
+function select_top_subtrees(
+    common_subtrees::Dict{Node,Int}, n::Int, options::AbstractOptions
+)
+    filtered_subtrees = filter(
+        pair -> begin
+            node = pair.first
+            complexity = compute_complexity(node, options)
+            return complexity <= 20 # TODO the 20 can be tuned
+        end, common_subtrees
+    )
+
+    sorted_subtrees = sort(
+        collect(filtered_subtrees); by=x -> (x[2] * (1.0 + 0.3 * randn())), rev=true
+    ) # TODO the 0.3 can be tuned
+
     result = Node[]
-    
+
     for i in 1:min(n, length(sorted_subtrees))
         push!(result, sorted_subtrees[i][1])
     end
-    
+
     while length(result) < n
         current_num = (length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1 # TODO for the rest of the slots, we use 1, -1, 2, -2, 3, -3, ...
         is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
         val = is_positive ? Float32(current_num) : Float32(-current_num)
         push!(result, Node(; val=val))
     end
-    
+
     return result
 end
 
-function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::AbstractOptions)
+function evaluate_subtrees(
+    subtrees::Vector{Node}, dataset::Dataset, options::AbstractOptions
+)
     n_samples = size(dataset.X, 2)  # Use the number of columns as the number of samples
     n_subtrees = length(subtrees)
-    
+
     # Create a result matrix - using the same type as dataset.X
     T = eltype(dataset.X)
     result = zeros(T, n_samples, n_subtrees)
-    
+
     # @info "n_subtrees: $n_subtrees"
     # @info "n_samples: $n_samples"
 
@@ -878,22 +875,22 @@ function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::Ab
         else
             # Creates an Expression object, providing the necessary parameters
             # @info "Evaluating subtree: $subtree"  # Print the Node object first
-            
+
             # Use operators in options when creating an Expression
             expr = Expression(
-                subtree,
+                subtree;
                 operators=options.operators,  # Use operators in options
-                variable_names=dataset.variable_names  # Get variable_names from dataset
+                variable_names=dataset.variable_names,  # Get variable_names from dataset
             )
-            
+
             # Evaluate on data set X
             # @info "Starting eval_tree_array..."
             output, success = eval_tree_array(
-                expr, 
-                dataset.X  # Just use X, no transpose
+                expr,
+                dataset.X,  # Just use X, no transpose
             )
             # @info "eval_tree_array completed" success=success output_size=size(output)
-            
+
             if success
                 # If the output is one-dimensional, it is assigned directly to the corresponding column
                 if length(output) == n_samples
@@ -909,7 +906,7 @@ function evaluate_subtrees(subtrees::Vector{Node}, dataset::Dataset, options::Ab
             end
         end
     end
-    
+
     # @info "Evaluation complete" result_size=size(result)
     return result
 end
@@ -917,8 +914,8 @@ end
 function analyze_common_subtrees(trees::Vector{<:Expression})
     # TODO - This is obviously not efficient, but it works for now
 
-    subtree_counts = Dict{Node, Int}()
-    
+    subtree_counts = Dict{Node,Int}()
+
     for tree in trees
         if !isnothing(tree.tree)
             subtrees = get_subtrees(tree)
@@ -927,10 +924,10 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
             end
         end
     end
-    
+
     threshold = length(trees) * 0.01 # TODO need to adjust this threshold in tghe future
     common_patterns = filter(p -> p.second >= threshold, subtree_counts)
-    
+
     if !isempty(common_patterns)
         # println("\nCommon subtree patterns:")
         for (pattern, count) in common_patterns
@@ -938,7 +935,7 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
             # @info pattern
         end
     end
-    
+
     return common_patterns
 end
 
@@ -955,18 +952,18 @@ function get_subtrees(node::Node)
     if isnothing(node)
         return subtrees
     end
-    
+
     push!(subtrees, node)
-    
+
     # Recursive processing of left and right subtrees
     if isdefined(node, :l) && !isnothing(node.l)
         append!(subtrees, get_subtrees(node.l))
     end
-    
+
     if isdefined(node, :r) && !isnothing(node.r)
         append!(subtrees, get_subtrees(node.r))
     end
-    
+
     return subtrees
 end
 
@@ -978,17 +975,13 @@ function start_psrn_task(
     dominating_trees::Vector{<:Expression},
     dataset::Dataset,
     options::AbstractOptions,
-    N_PSRN_INPUT::Int
+    N_PSRN_INPUT::Int,
 )
-    
-    
     if manager.current_task !== nothing && !istaskdone(manager.current_task)
-        return
+        return nothing
     end
-    
-    
-    
-    manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
+
+    return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
         try
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
@@ -1000,14 +993,14 @@ function start_psrn_task(
             # @info "Selected subtrees:" top_subtrees
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-            
+
             # add downsampling 
             n_samples = size(X_mapped, 1)
             if n_samples > manager.max_samples
                 # random sample
-                sample_indices = randperm(n_samples)[1:manager.max_samples]
+                sample_indices = randperm(n_samples)[1:(manager.max_samples)]
                 X_mapped_sampled = X_mapped[sample_indices, :]
-                
+
                 # check the dimension of dataset.y
                 y_dims = size(dataset.y)
                 if length(y_dims) == 1
@@ -1019,7 +1012,6 @@ function start_psrn_task(
                 X_mapped_sampled = X_mapped
                 y_sampled = dataset.y
             end
-
 
             # add debug info
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
@@ -1036,33 +1028,33 @@ function start_psrn_task(
             variable_names = ["x$i" for i in 1:n_variables]
             manager.net.current_expr_ls = if isnothing(top_subtrees)
                 # Variable expressions are used by default
-                [Expression(
-                    Node(Float32; feature=i);
-                    operators=options.operators,
-                    variable_names=variable_names
-                ) for i in 1:n_variables]
+                [
+                    Expression(
+                        Node(Float32; feature=i);
+                        operators=options.operators,
+                        variable_names=variable_names,
+                    ) for i in 1:n_variables
+                ]
             elseif top_subtrees isa Vector{Node}
                 # If it is a Node array, convert it to an Expression array
-                [Expression(
-                    node;
-                    operators=options.operators,
-                    variable_names=variable_names
-                ) for node in top_subtrees]
+                [
+                    Expression(
+                        node; operators=options.operators, variable_names=variable_names
+                    ) for node in top_subtrees
+                ]
             elseif top_subtrees isa Vector{Expression}
                 # If it is already an Expression array, use it directly
                 top_subtrees
             else
-                throw(ArgumentError("top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}"))
+                throw(
+                    ArgumentError(
+                        "top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}",
+                    ),
+                )
             end
 
-
-
             best_expressions = get_best_expr_and_MSE_topk(
-                manager.net, 
-                X_mapped_sampled,
-                y_sampled,
-                100,
-                device_id
+                manager.net, X_mapped_sampled, y_sampled, 100, device_id
             )
 
             put!(manager.channel, best_expressions)
@@ -1092,7 +1084,7 @@ function process_psrn_results!(
     manager::PSRNManager,
     hall_of_fame::HallOfFame,
     dataset::Dataset,
-    options::AbstractOptions
+    options::AbstractOptions,
 )
     while isready(manager.channel)
         new_expressions = take!(manager.channel)
@@ -1102,9 +1094,9 @@ function process_psrn_results!(
                 converted_expr = Expression(
                     psrn_expr.tree;  # Only keep the tree structure
                     operators=nothing,  # Set to nothing
-                    variable_names=nothing  # Set to nothing
+                    variable_names=nothing,  # Set to nothing
                 )
-                
+
                 member = PopMember(dataset, converted_expr, options; deterministic=false)
                 # @info "PSRN member: $member"
                 # @info "type of member: $(typeof(member))"
@@ -1114,7 +1106,6 @@ function process_psrn_results!(
         end
     end
 end
-
 
 function _main_search_loop!(
     state::AbstractSearchState{T,L,N},
@@ -1149,15 +1140,15 @@ function _main_search_loop!(
         # N_PSRN_INPUT = 10
         N_PSRN_INPUT = 15 # TODO this can be tuned
 
-        psrn_manager = PSRNManager(
-            N_PSRN_INPUT = N_PSRN_INPUT,            # these operators must be the subset of options.operators
-            operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
+        psrn_manager = PSRNManager(;
+            N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
+            operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Sub", "Div", "Identity"],
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
-            n_symbol_layers = 2, # TODO if use 3 layer, easily crash (segfault), don't know why
-            options = options,
-            max_samples = 100
+            n_symbol_layers=2, # TODO if use 3 layer, easily crash (segfault), don't know why
+            options=options,
+            max_samples=100,
             # max_samples = 10
         )
     else
@@ -1235,16 +1226,15 @@ function _main_search_loop!(
             #! format: on
 
             dominating = calculate_pareto_frontier(state.halls_of_fame[j])
-            
+
             dominating_trees = [member.tree for member in dominating]
 
             if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
-                start_psrn_task(psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT)
+                start_psrn_task(
+                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT
+                )
                 process_psrn_results!(
-                    psrn_manager,
-                    state.halls_of_fame[j],
-                    dataset,
-                    options
+                    psrn_manager, state.halls_of_fame[j], dataset, options
                 )
             end
 
@@ -1393,7 +1383,6 @@ function _main_search_loop!(
     return nothing
 end
 
-
 function _tear_down!(
     state::AbstractSearchState, ropt::AbstractRuntimeOptions, options::AbstractOptions
 )
@@ -1498,7 +1487,6 @@ function _info_dump(
                 ropt.progress ? displaysize(stdout)[2] : nothing,
                 Some(nothing)
             )
-        
         )
         println(equation_strings)
     end

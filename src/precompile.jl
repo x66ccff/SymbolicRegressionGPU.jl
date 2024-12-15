@@ -35,14 +35,16 @@ function _precompile_psrn_evaluation()
         T = Float32
         n_samples = 10
         n_subtrees = 5
-        
+
         X_mapped = rand(T, n_samples, n_subtrees)
         y = rand(T, 1, n_samples)
-        
-        options = Options(; binary_operators=(+, *, -, /), unary_operators=(cos, sin, exp, log))
+
+        options = Options(;
+            binary_operators=(+, *, -, /), unary_operators=(cos, sin, exp, log)
+        )
         operators = options.operators
         variable_names = ["x1"]
-        
+
         trees = Vector{Expression}()
         for i in 1:n_subtrees
             x1 = Expression(Node{T}(; feature=1); operators, variable_names)
@@ -50,19 +52,19 @@ function _precompile_psrn_evaluation()
             push!(trees, tree)
         end
         @compile_workload begin
-            psrn = PSRN(
-                n_variables = n_subtrees,
-                operators = ["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-                n_symbol_layers = 2,
-                dr_mask = nothing,
-                device = 0,
+            psrn = PSRN(;
+                n_variables=n_subtrees,
+                operators=[
+                    "Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"
+                ],
+                n_symbol_layers=2,
+                dr_mask=nothing,
+                device=0,
                 # initial_expressions = trees,
-                options = options
+                options=options,
             )
             X_mapped = Float32.(X_mapped) # for saving memory
             X_mapped = Tensor(X_mapped)
-
-
 
             device_id = 0
 
@@ -71,41 +73,35 @@ function _precompile_psrn_evaluation()
             variable_names = ["x$i" for i in 1:n_variables]
             psrn.current_expr_ls = if isnothing(trees)
                 # Variable expressions are used by default
-                [Expression(
-                    Node(Float32; feature=i);
-                    operators=options.operators,
-                    variable_names=variable_names
-                ) for i in 1:n_variables]
+                [
+                    Expression(
+                        Node(Float32; feature=i);
+                        operators=options.operators,
+                        variable_names=variable_names,
+                    ) for i in 1:n_variables
+                ]
             elseif trees isa Vector{Node}
                 # If it is a Node array, convert it to an Expression array
-                [Expression(
-                    node;
-                    operators=options.operators,
-                    variable_names=variable_names
-                ) for node in trees]
+                [
+                    Expression(
+                        node; operators=options.operators, variable_names=variable_names
+                    ) for node in trees
+                ]
             elseif trees isa Vector{Expression}
                 # If it is already an Expression array, use it directly
                 trees
             else
-                throw(ArgumentError("trees must be Nothing, Vector{Node}, or Vector{Expression}"))
+                throw(
+                    ArgumentError(
+                        "trees must be Nothing, Vector{Node}, or Vector{Expression}"
+                    ),
+                )
             end
 
-
-
-            best_expressions = get_best_expr_and_MSE_topk(
-                psrn, 
-                X_mapped,
-                y,
-                100,
-                device_id
-            )
-
-
-
+            best_expressions = get_best_expr_and_MSE_topk(psrn, X_mapped, y, 100, device_id)
         end
     end
 end
-
 
 """`mode=:precompile` will use `@precompile_*` directives; `mode=:compile` runs."""
 function do_precompilation(::Val{mode}) where {mode}
@@ -167,7 +163,7 @@ function do_precompilation(::Val{mode}) where {mode}
 
     # precompile(PSRN, (Int, Vector{String}, Int, Any, Vector{Expression}, Options))
     # precompile(get_best_expressions, (PSRN, AbstractArray, AbstractArray, Any, Options, Int))
-    
+
     _precompile_psrn_evaluation()
     # _precompile_psrn_evaluation2()
 

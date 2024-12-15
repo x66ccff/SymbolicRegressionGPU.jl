@@ -1,16 +1,22 @@
 __precompile__(false)
 module PSRNfunctions
 
-
 using THArrays
 
 # Constants definition
-const libtorch_dtype_dict = Dict{Int, DataType}(
-    0 => UInt8, 1 => Int8, 2 => Int16, 3 => Int32, 4 => Int64,
-    5 => Float16, 6 => Float32, 7 => Float64
+const libtorch_dtype_dict = Dict{Int,DataType}(
+    0 => UInt8,
+    1 => Int8,
+    2 => Int16,
+    3 => Int32,
+    4 => Int64,
+    5 => Float16,
+    6 => Float32,
+    7 => Float64,
 )
-const libtorch_dtype_reverse_dict = Dict{DataType, Int}(v => k for (k, v) in libtorch_dtype_dict)
-
+const libtorch_dtype_reverse_dict = Dict{DataType,Int}(
+    v => k for (k, v) in libtorch_dtype_dict
+)
 
 function generate_triu_sum_script()
     return """
@@ -41,7 +47,6 @@ const TRIU_MUL_SCRIPT = THJIT.compile(generate_triu_mul_script())
 function triu_mul(tensor::Tensor)
     return TRIU_MUL_SCRIPT.main(tensor)
 end
-
 
 function generate_div_script()
     return """
@@ -82,7 +87,7 @@ function neg_kernel!(x::Tensor)
 end
 
 function inv_kernel!(x::Tensor)
-    return 1/x
+    return 1 / x
 end
 
 function sin_kernel!(x::Tensor)
@@ -123,7 +128,16 @@ function sub_kernel!(x::Tensor)
 end
 
 # Export functions
-export identity_kernel!, add_kernel!, mul_kernel!, div_kernel!, sub_kernel!,
-       neg_kernel!, inv_kernel!, sin_kernel!, cos_kernel!, exp_kernel!,
-       log_kernel!, sqrt_kernel!
+export identity_kernel!,
+    add_kernel!,
+    mul_kernel!,
+    div_kernel!,
+    sub_kernel!,
+    neg_kernel!,
+    inv_kernel!,
+    sin_kernel!,
+    cos_kernel!,
+    exp_kernel!,
+    log_kernel!,
+    sqrt_kernel!
 end

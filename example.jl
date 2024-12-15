@@ -5,8 +5,7 @@ using SymbolicRegression
 function main()
     X = randn(Float32, 5, 100)
     # y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
-    y = 2 * cos.(X[4, :]).^3 + X[1, :] .^ 2 .- 2
-
+    y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2
 
     options = SymbolicRegression.Options(;
         binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin]

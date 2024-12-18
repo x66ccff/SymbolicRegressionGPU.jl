@@ -67,7 +67,7 @@ julia --project=. example.jl
 To cite this fork SymbolicRegressionGPU.jl, please use the following BibTeX entry:
 
 ```bibtex
-@misc{SymbolicRegressionGPU.jl PSRN enhanced SymbolicRegression.jl for fast, large-scale parallel symbolic evaluations on GPUs,
+@misc{SymbolicRegressionGPU.jl,
   author = {
     Ruan, Kai AND
     Cranmer, Miles AND

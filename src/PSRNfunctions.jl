@@ -1,133 +1,113 @@
-__precompile__(false)
 module PSRNfunctions
 
-using THArrays
-
-# Constants definition
-const libtorch_dtype_dict = Dict{Int,DataType}(
-    0 => UInt8,
-    1 => Int8,
-    2 => Int16,
-    3 => Int32,
-    4 => Int64,
-    5 => Float16,
-    6 => Float32,
-    7 => Float64,
-)
-const libtorch_dtype_reverse_dict = Dict{DataType,Int}(
-    v => k for (k, v) in libtorch_dtype_dict
-)
-
-function generate_triu_sum_script()
-    return """
-    def main(x):
-        in_dim = x.size(1)
-        indices = torch.triu_indices(in_dim, in_dim, offset=0)
-        return x[:, indices[0]] + x[:, indices[1]]
-    """
+# 一元操作的辅助函数
+function apply_unary(f::Function, x::AbstractMatrix)
+    return f.(x)
 end
 
-const TRIU_SUM_SCRIPT = THJIT.compile(generate_triu_sum_script())
-
-function triu_sum(tensor::Tensor)
-    return TRIU_SUM_SCRIPT.main(tensor)
+# 生成上三角矩阵的索引
+function get_triu_indices(n::Int)
+    indices = Tuple{Int,Int}[]
+    for i in 1:n
+        for j in i:n
+            push!(indices, (i,j))
+        end
+    end
+    return indices
 end
 
-function generate_triu_mul_script()
-    return """
-    def main(x):
-        in_dim = x.size(1)
-        indices = torch.triu_indices(in_dim, in_dim, offset=0)
-        return x[:, indices[0]] * x[:, indices[1]]
-    """
+# 基本一元运算函数
+function identity_kernel!(x::AbstractMatrix)
+    return copy(x)
 end
 
-const TRIU_MUL_SCRIPT = THJIT.compile(generate_triu_mul_script())
-
-function triu_mul(tensor::Tensor)
-    return TRIU_MUL_SCRIPT.main(tensor)
-end
-
-function generate_div_script()
-    return """
-    def main(x):
-        num = x.view(1, -1, 1)
-        deno = x.view(1, 1, -1)
-        return (num / deno).view(1, -1)
-    """
-end
-
-function generate_sub_script()
-    return """
-    def main(x):
-        num = x.view(1, -1, 1)
-        deno = x.view(1, 1, -1)
-        return (num - deno).view(1, -1)
-    """
-end
-
-const DIV_SCRIPT = THJIT.compile(generate_div_script())
-const SUB_SCRIPT = THJIT.compile(generate_sub_script())
-
-function broadcast_div(tensor::Tensor)
-    return DIV_SCRIPT.main(tensor)
-end
-
-function broadcast_sub(tensor::Tensor)
-    return SUB_SCRIPT.main(tensor)
-end
-
-# Basic unary operations
-function identity_kernel!(x::Tensor)
-    return x
-end
-
-function neg_kernel!(x::Tensor)
+function neg_kernel!(x::AbstractMatrix)
     return -x
 end
 
-function inv_kernel!(x::Tensor)
-    return 1 / x
+function inv_kernel!(x::AbstractMatrix)
+    return 1.0 ./ x
 end
 
-function sin_kernel!(x::Tensor)
-    return sin(x)
+function sin_kernel!(x::AbstractMatrix)
+    return sin.(x)
 end
 
-function cos_kernel!(x::Tensor)
-    return cos(x)
+function cos_kernel!(x::AbstractMatrix)
+    return cos.(x)
 end
 
-function exp_kernel!(x::Tensor)
-    return exp(x)
+function exp_kernel!(x::AbstractMatrix)
+    return exp.(x)
 end
 
-function log_kernel!(x::Tensor)
-    return log(x)
+function log_kernel!(x::AbstractMatrix)
+    return log.(x)
 end
 
-function sqrt_kernel!(x::Tensor)
-    return sqrt(x)
+function sqrt_kernel!(x::AbstractMatrix)
+    return sqrt.(x)
 end
 
-# Binary operations
-function add_kernel!(x::Tensor)
-    return triu_sum(x)
+# 二元运算函数
+
+# 上三角加法: (n) -> (n*(n+1)/2)
+function add_kernel!(x::AbstractMatrix)
+    n = size(x, 2)
+    indices = get_triu_indices(n)
+    result = zeros(eltype(x), size(x, 1), length(indices))
+    
+    for (idx, (i, j)) in enumerate(indices)
+        result[:, idx] = x[:, i] + x[:, j]
+    end
+    
+    return result
 end
 
-function mul_kernel!(x::Tensor)
-    return triu_mul(x)
+# 上三角乘法: (n) -> (n*(n+1)/2)
+function mul_kernel!(x::AbstractMatrix)
+    n = size(x, 2)
+    indices = get_triu_indices(n)
+    result = zeros(eltype(x), size(x, 1), length(indices))
+    
+    for (idx, (i, j)) in enumerate(indices)
+        result[:, idx] = x[:, i] .* x[:, j]
+    end
+    
+    return result
 end
 
-function div_kernel!(x::Tensor)
-    return broadcast_div(x)
+# 广播除法: (n) -> (n*n)
+function div_kernel!(x::AbstractMatrix)
+    n = size(x, 2)
+    result = zeros(eltype(x), size(x, 1), n * n)
+    
+    for i in 1:n
+        for j in 1:n
+            idx = (i-1)*n + j
+            result[:, idx] = x[:, i] ./ x[:, j]
+        end
+    end
+    
+    return result
 end
 
-function sub_kernel!(x::Tensor)
-    return broadcast_sub(x)
+# 广播减法: (n) -> (n*n)
+function sub_kernel!(x::AbstractMatrix)
+    n = size(x, 2)
+    result = zeros(eltype(x), size(x, 1), n * n)
+    
+    for i in 1:n
+        for j in 1:n
+            idx = (i-1)*n + j
+            result[:, idx] = x[:, i] .- x[:, j]
+        end
+    end
+    
+    return result
 end
 
-# Export functions
+# 导出所有函数
 export identity_kernel!,
     add_kernel!,
     mul_kernel!,

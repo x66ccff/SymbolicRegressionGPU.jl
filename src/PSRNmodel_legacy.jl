@@ -25,7 +25,7 @@ import ..CoreModule: Options, Dataset
 
 using Printf: @sprintf
 using DynamicExpressions: Node, Expression
-using Reactant: @compile, ConcreteRArray
+using THArrays
 
 # Operator abstractions
 abstract type Operator end
@@ -59,38 +59,78 @@ const OPERATORS = Dict{String,Operator}(
     "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> -x),
 )
 
-# Helper functions for array concatenation
-function concat_arrays(arrays::Vector{<:AbstractMatrix})
-    return hcat(arrays...)
+# generate torchscript code for concatenating tensors
+function generate_cat_script(n::Int)
+    args = join(('a':'z')[1:n], ", ")
+    tensors = "(" * join(('a':'z')[1:n], ", ") * ")"
+    return """
+    def main($args):
+        return torch.cat($tensors, dim=1)
+    """
 end
 
-# Helper function for top-k indices
-function topk_indices(errors::AbstractMatrix, k::Int)
-    # 如果要找最小的k个
-    sorted_indices = partialsortperm(vec(errors), k)
-    return sorted_indices
+const COMPILATION_UNITS = Dict{Int,Any}()
+for n in 2:26
+    COMPILATION_UNITS[n] = THJIT.compile(generate_cat_script(n))
+end
+
+function concat_tensors(tensors::Vector{<:Tensor})
+    n = length(tensors)
+    if n < 2
+        error("Need at least 2 tensors to concatenate")
+    elseif n > 26
+        error("Maximum 26 tensors supported")
+    end
+
+    cu = COMPILATION_UNITS[n]
+    return cu.main(tensors...)
+end
+
+function generate_topk_script(k::Int)
+    return """
+    def main(x):
+        return torch.topk(x, k=$(k), dim=1, largest=False, sorted=True)[1].squeeze()
+    """
+end
+
+const TOPK_SCRIPTS = Dict{Int,Any}(
+    k => THJIT.compile(generate_topk_script(k)) for k in [5, 10, 20, 50, 100]
+)
+
+function topk_indices(tensor::Tensor, k::Int)
+    if !haskey(TOPK_SCRIPTS, k)
+        TOPK_SCRIPTS[k] = THJIT.compile(generate_topk_script(k))
+    end
+    return TOPK_SCRIPTS[k].main(tensor)
 end
 
 # DRLayer implementation
 mutable struct DRLayer
     in_dim::Int
     out_dim::Int
-    dr_indices::Vector{Int}
-    dr_mask::Vector{Bool}
+    dr_indices::Tensor
+    dr_mask::Tensor
+    device::Int
 
-    function DRLayer(in_dim::Int, dr_mask::Vector{Bool})
+    function DRLayer(in_dim::Int, dr_mask::Vector{Bool}, device::Int)
         out_dim = sum(dr_mask)
-        dr_indices = findall(dr_mask)
-        return new(in_dim, out_dim, dr_indices, dr_mask)
+        arange_tensor = collect(0:(length(dr_mask) - 1))
+        # convert to Tensor 
+        dr_indices = Tensor(arange_tensor[dr_mask])
+        dr_mask_tensor = Tensor(dr_mask)
+        # move to device
+        dr_indices = to(dr_indices, CUDA(device))
+        dr_mask_tensor = to(dr_mask_tensor, CUDA(device))
+        return new(in_dim, out_dim, dr_indices, dr_mask_tensor, device)
     end
 end
 
-function forward(layer::DRLayer, x::AbstractMatrix)
+function forward(layer::DRLayer, x::Tensor)
     return x[:, layer.dr_mask]
 end
 
 function get_op_and_offset(layer::DRLayer, index::Int)
-    return layer.dr_indices[index + 1]
+    return Int(Array(layer.dr_indices)[index + 1])
 end
 
 # SymbolLayer implementation
@@ -105,9 +145,10 @@ mutable struct SymbolLayer
     n_triu::Int
     in_dim_square::Int
     out_dim_cum_ls::Union{Vector{Int},Nothing}
-    offset_tensor::Union{Matrix{Int},Nothing}
+    offset_tensor::Union{AbstractArray,Nothing}
+    device::Int
 
-    function SymbolLayer(in_dim::Int, operator_names::Vector{String})
+    function SymbolLayer(in_dim::Int, operator_names::Vector{String}, device::Int)
         n_binary_U = 0
         n_binary_D = 0
         n_unary = 0
@@ -155,8 +196,18 @@ mutable struct SymbolLayer
         out_dim = n_unary * in_dim + n_binary_U * n_triu + n_binary_D * in_dim_square
 
         layer = new(
-            in_dim, out_dim, operators, n_binary_U, n_binary_D, n_unary,
-            operator_list, n_triu, in_dim_square, nothing, nothing
+            in_dim,
+            out_dim,
+            operators,
+            n_binary_U,
+            n_binary_D,
+            n_unary,
+            operator_list,
+            n_triu,
+            in_dim_square,
+            nothing,
+            nothing,
+            device,
         )
 
         init_offset(layer)
@@ -164,7 +215,6 @@ mutable struct SymbolLayer
     end
 end
 
-# SymbolLayer methods
 function get_out_dim_cum_ls(layer::SymbolLayer)
     if layer.out_dim_cum_ls !== nothing
         return layer.out_dim_cum_ls
@@ -195,11 +245,10 @@ function get_offset_tensor(layer::SymbolLayer)
     binary_D_tensor = zeros(Int, layer.in_dim_square, 2)
     unary_tensor = zeros(Int, layer.in_dim, 2)
 
-    # Fill unary tensor
     unary_tensor[:, 1] = arange_tensor
     unary_tensor[:, 2] .= layer.in_dim
 
-    # Fill binary_U_tensor (undirected binary operations)
+    # Fill binary_U_tensor (index of undirected binary operation)
     start = 1
     for i in 0:(layer.in_dim - 1)
         len = layer.in_dim - i
@@ -208,7 +257,7 @@ function get_offset_tensor(layer::SymbolLayer)
         start += len
     end
 
-    # Fill binary_D_tensor (directed binary operations)
+    # Fill binary_D_tensor (index of directed binary operation)
     start = 1
     for i in 0:(layer.in_dim - 1)
         len = layer.in_dim
@@ -217,7 +266,7 @@ function get_offset_tensor(layer::SymbolLayer)
         start += len
     end
 
-    # Combine all indices
+    # Combine all indexes
     start = 1
     for func in layer.operator_list
         if func isa UnaryOperator
@@ -229,12 +278,15 @@ function get_offset_tensor(layer::SymbolLayer)
         offset_tensor[start:(start + len - 1), :] = t
         start += len
     end
-
+    # convert to Tensor
+    # offset_tensor = Tensor(offset_tensor)
+    # move to device
+    # offset_tensor = to(offset_tensor, CUDA(layer.device))
     return offset_tensor
 end
 
 function init_offset(layer::SymbolLayer)
-    layer.offset_tensor = get_offset_tensor(layer)
+    return layer.offset_tensor = get_offset_tensor(layer)
 end
 
 function get_op_and_offset(layer::SymbolLayer, index::Int)
@@ -250,13 +302,13 @@ function get_op_and_offset(layer::SymbolLayer, index::Int)
     return layer.operator_list[op_idx], offset
 end
 
-function forward(layer::SymbolLayer, x::AbstractMatrix)
-    results = AbstractMatrix[]
+function forward(layer::SymbolLayer, x::Tensor)
+    results = Tensor[]
     for op in layer.operator_list
         result = op.kernel(x)
         push!(results, result)
     end
-    return concat_arrays(results)
+    return concat_tensors(results)
 end
 
 # PSRN implementation
@@ -268,6 +320,7 @@ mutable struct PSRN
     out_dim::Int
     use_dr_mask::Bool
     current_expr_ls::Vector{Expression}
+    device::Int
     options::Options
 
     function PSRN(;
@@ -275,6 +328,7 @@ mutable struct PSRN
         operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg"],
         n_symbol_layers::Int=3,
         dr_mask::Union{Vector{Bool},Nothing}=nothing,
+        device::Int=0,
         options::Options=Options(),
     )
         layers = Union{SymbolLayer,DRLayer}[]
@@ -282,13 +336,13 @@ mutable struct PSRN
 
         for i in 1:n_symbol_layers
             if use_dr_mask && i == n_symbol_layers
-                push!(layers, DRLayer(layers[end].out_dim, dr_mask))
+                push!(layers, DRLayer(layers[end].out_dim, dr_mask, device))
             end
 
             if i == 1
-                push!(layers, SymbolLayer(n_variables, operators))
+                push!(layers, SymbolLayer(n_variables, operators, device))
             else
-                push!(layers, SymbolLayer(layers[end].out_dim, operators))
+                push!(layers, SymbolLayer(layers[end].out_dim, operators, device))
             end
         end
 
@@ -299,54 +353,54 @@ mutable struct PSRN
             layers,
             layers[end].out_dim,
             use_dr_mask,
-            Expression[],
+            [],
+            device,
             options,
         )
     end
 end
 
-function PSRN_forward(model::PSRN, x::AbstractMatrix)
+function PSRN_forward(model::PSRN, x::Tensor)
     h = x
+    # print the device of h
+    # @info "h device: $(on(x).index)"
     for layer in model.layers
         h = forward(layer, h)
     end
     return h
 end
 
-# Convenience function for getting the compiled version using Reactant
-function compile_psrn(model::PSRN, dummy_input::AbstractMatrix)
-    println("Compiling PSRN... ⏳")
-    println("dummy_input: ", typeof(dummy_input))
-    println("shape: ", size(dummy_input))
-
-    dummy_input = ConcreteRArray(dummy_input)
-    f = @compile PSRN_forward(model, dummy_input)
-    println("Compiling PSRN finished ✅")
-    return f
-end
 
 function get_best_expr_and_MSE_topk(
     model::PSRN,
-    X::AbstractMatrix,
+    X::THArrays.Tensor{Float32,2},
     Y::Vector{Float32},
-    n_top::Int
+    n_top::Int,
+    device_id::Int,
 )
     # Calculate MSE for all expressions
     batch_size = size(X, 1)
-    Y = Float32.(Y)
-    sum_squared_errors = zeros(Float32, 1, model.out_dim)
+    Y = Float32.(Y) # for saving memory
+    # sum_squared_errors = Tensor(zeros((1, model.out_dim)))
+    sum_squared_errors = Tensor(zeros(Float32, (1, model.out_dim))) # for saving memory
+
+    sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
 
     # Compute sum of squared errors
     for i in 1:batch_size
         x_sliced = X[i:i, :]
+        x_sliced = to(x_sliced, CUDA(device_id))
         H = PSRN_forward(model, x_sliced)
         diff = H .- Y[i]
-        sum_squared_errors .+= diff.^2
+        square = diff * diff # don't use ^2, because it will get Float64
+        sum_squared_errors += square
     end
 
     # Calculate mean
     mean_errors = sum_squared_errors ./ batch_size
-    indices = topk_indices(mean_errors, n_top)
+    indices = topk_indices(mean_errors, n_top) + 1 # add 1 because the index is 0-based
+
+    indices = Array(to(indices, CPU()))
 
     # Get expressions for best indices
     expr_best_ls = Expression[]
@@ -354,17 +408,15 @@ function get_best_expr_and_MSE_topk(
         push!(expr_best_ls, get_expr(model, i))
     end
 
-    return expr_best_ls
-end
+    # Print results
+    # println("Best expressions:")
+    # println("-"^20)
+    # for expr in expr_best_ls
+    # println(expr)
+    # end
+    # println("-"^20)
 
-function Base.show(io::IO, model::PSRN)
-    print(
-        io,
-        "PSRN(n_variables=$(model.n_variables), operators=$(model.operators), " *
-        "n_layers=$(model.n_symbol_layers))\n",
-    )
-    print(io, "Layer dimensions: ")
-    return print(io, join([layer.out_dim for layer in model.layers], " → "))
+    return expr_best_ls
 end
 
 function get_expr(model::PSRN, index::Int)
@@ -372,8 +424,17 @@ function get_expr(model::PSRN, index::Int)
 end
 
 function _get_expr(model::PSRN, index::Int, layer_idx::Int)
+    # @info "\t\tGetting expression for index $index, layer_idx $layer_idx"
     if layer_idx < 1
-        return model.current_expr_ls[index]
+        return model.current_expr_ls[index + 1]
+        # try
+        #     return model.current_expr_ls[index + 1]
+        # catch e
+        #     if isa(e, BoundsError)
+        #         @error "BoundsError: length of model.current_expr_ls is $(length(model.current_expr_ls)), however got index $index"
+        #         throw(e)
+        #     end
+        # end
     end
 
     layer = model.layers[layer_idx]
@@ -397,6 +458,16 @@ function _get_expr(model::PSRN, index::Int, layer_idx::Int)
     end
 end
 
+function Base.show(io::IO, model::PSRN)
+    print(
+        io,
+        "PSRN(n_variables=$(model.n_variables), operators=$(model.operators), " *
+        "n_layers=$(model.n_symbol_layers))\n",
+    )
+    print(io, "Layer dimensions: ")
+    return print(io, join([layer.out_dim for layer in model.layers], " → "))
+end
+
 # Export types and functions
 export PSRN,
     SymbolLayer,
@@ -408,4 +479,4 @@ export PSRN,
     get_expr,
     get_op_and_offset
 
-end # module
+end

@@ -1144,18 +1144,19 @@ function _main_search_loop!(
 
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
-        # N_PSRN_INPUT = 10
-        N_PSRN_INPUT = 15 # TODO this can be tuned
+        N_PSRN_INPUT = 15
+        # N_PSRN_INPUT = 15 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
-            operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
+            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
+            operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Sub", "Div", "Identity"],
-            # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
+            # operators = ["Add", "Mul", "Neg", "Inv", "Identity"],
             n_symbol_layers=2, # TODO if use 3 layer, easily crash (segfault), don't know why
             options=options,
-            max_samples=100,
+            max_samples=20,
             # max_samples = 10
         )
     else

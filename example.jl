@@ -1,3 +1,4 @@
+# export JULIA_NUM_THREADS=4
 # julia --project=. example.jl
 
 using SymbolicRegression

@@ -166,7 +166,6 @@ using DynamicExpressions: with_type_parameters
     LogCoshLoss
 using DynamicDiff: D
 using Compat: @compat, Fix
-using THArrays
 
 #! format: off
 @compat(
@@ -820,7 +819,6 @@ mutable struct PSRNManager
             operators=operators,
             n_symbol_layers=n_symbol_layers,
             dr_mask=nothing,
-            device=0,
             options=options,
         )
 
@@ -1024,7 +1022,6 @@ function start_psrn_task(
             # to cuda 0
             X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
             y_sampled = Float32.(y_sampled) # for saving memory
-            X_mapped_sampled = Tensor(X_mapped_sampled)
             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
 
             # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
@@ -1061,7 +1058,7 @@ function start_psrn_task(
             end
 
             best_expressions = get_best_expr_and_MSE_topk(
-                manager.net, X_mapped_sampled, y_sampled, 100, device_id
+                manager.net, X_mapped_sampled, y_sampled, 100
             )
 
             put!(manager.channel, best_expressions)
@@ -1145,7 +1142,7 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 10
-        N_PSRN_INPUT = 15 # TODO this can be tuned
+        N_PSRN_INPUT = 20 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators

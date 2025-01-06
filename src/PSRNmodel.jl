@@ -26,48 +26,88 @@ import ..CoreModule: Options, Dataset
 using Printf: @sprintf
 using DynamicExpressions: Node, Expression
 using Reactant: @compile, ConcreteRArray
+import Base: copy
+
+using ProgressMeter
+
+
+using Reactant
+const CompiledKernel = Reactant.Compiler.Thunk
+
+const T_kernel_compiling = Float32  # Default Float64
+const T_kernel_compiling_idx = Int64  # Default Float64
 
 # Operator abstractions
 abstract type Operator end
 
-struct UnaryOperator <: Operator
+mutable struct UnaryOperator <: Operator
     name::String
     kernel::Function
-    is_directed::Bool
+    compiled_kernel::Union{CompiledKernel, Nothing}
     expr_gen::Function
 end
 
-struct BinaryOperator <: Operator
+abstract type BinaryOperator <: Operator end
+
+mutable struct BinaryTriuOperator <: BinaryOperator
     name::String
     kernel::Function
-    is_directed::Bool
+    compiled_kernel::Union{CompiledKernel, Nothing}
     expr_gen::Function
+end
+
+mutable struct BinarySquaredOperator <: BinaryOperator
+    name::String
+    kernel::Function
+    compiled_kernel::Union{CompiledKernel, Nothing}
+    expr_gen::Function
+end
+
+function copy(op::UnaryOperator)
+    UnaryOperator(op.name, op.kernel, op.compiled_kernel, op.expr_gen)
+end
+
+function copy(op::BinaryTriuOperator)
+    BinaryTriuOperator(op.name, op.kernel, op.compiled_kernel, op.expr_gen)
+end
+
+function copy(op::BinarySquaredOperator)
+    BinarySquaredOperator(op.name, op.kernel, op.compiled_kernel, op.expr_gen)
+end
+
+function get_scale(op::Operator, in_dim::Int)
+    if op isa UnaryOperator
+        return in_dim
+    elseif op isa BinaryTriuOperator
+        return in_dim * (in_dim + 1) ÷ 2
+    elseif op isa BinarySquaredOperator
+        return in_dim * in_dim
+    else
+        error("Unsupported operator type: $(typeof(op))")
+    end
 end
 
 # Operator dictionary
 const OPERATORS = Dict{String,Operator}(
-    "Identity" => UnaryOperator("Identity", identity_kernel!, true, identity),
-    "Sin" => UnaryOperator("Sin", sin_kernel!, true, sin),
-    "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
-    "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
-    "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
-    "Add" => BinaryOperator("Add", add_kernel!, false, +),
-    "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
-    "Div" => BinaryOperator("Div", div_kernel!, true, /),
-    "Sub" => BinaryOperator("Sub", sub_kernel!, true, -),
-    "Inv" => UnaryOperator("Inv", inv_kernel!, true, x -> 1 / x),
-    "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> -x),
+    "Identity" => UnaryOperator("Identity", identity_kernel!, nothing, identity),
+    "Sin" => UnaryOperator("Sin", sin_kernel!, nothing, sin),
+    "Cos" => UnaryOperator("Cos", cos_kernel!, nothing,  cos),
+    "Exp" => UnaryOperator("Exp", exp_kernel!, nothing, exp),
+    "Log" => UnaryOperator("Log", log_kernel!, nothing, safe_log),
+    "Add" => BinaryTriuOperator("Add", add_kernel!, nothing,  +),
+    "Mul" => BinaryTriuOperator("Mul", mul_kernel!, nothing,  *),
+    "Div" => BinarySquaredOperator("Div", div_kernel!, nothing,  /),
+    "Sub" => BinarySquaredOperator("Sub", sub_kernel!, nothing,  -),
+    "Inv" => UnaryOperator("Inv", inv_kernel!, nothing, x -> 1 / x),
+    "Neg" => UnaryOperator("Neg", neg_kernel!, nothing,  x -> -x),
 )
 
-# Helper functions for array concatenation
 function concat_arrays(arrays::Vector{<:AbstractMatrix})
     return hcat(arrays...)
 end
 
-# Helper function for top-k indices
 function topk_indices(errors::AbstractMatrix, k::Int)
-    # 如果要找最小的k个
-    sorted_indices = partialsortperm(vec(errors), k)
+    sorted_indices = partialsortperm(vec(errors), 1:k)
     return sorted_indices
 end
 
@@ -106,46 +146,44 @@ mutable struct SymbolLayer
     in_dim_square::Int
     out_dim_cum_ls::Union{Vector{Int},Nothing}
     offset_tensor::Union{Matrix{Int},Nothing}
+    triu_idx::Union{ConcreteRArray{T_kernel_compiling_idx, 2},Nothing}
+    squared_idx::Union{ConcreteRArray{T_kernel_compiling_idx, 2},Nothing}
+    hcat_compiled::Union{CompiledKernel, Nothing}
 
     function SymbolLayer(in_dim::Int, operator_names::Vector{String})
         n_binary_U = 0
         n_binary_D = 0
         n_unary = 0
         operator_list = Operator[]
-        operators = [OPERATORS[name] for name in operator_names]
+        operators = [copy(OPERATORS[name]) for name in operator_names]
 
         n_triu = (in_dim * (in_dim + 1)) ÷ 2
         in_dim_square = in_dim * in_dim
 
-        # Count operators
         for op in operators
-            if op isa BinaryOperator
-                if op.is_directed
-                    n_binary_D += 1
-                else
-                    n_binary_U += 1
-                end
-            else
+            if op isa UnaryOperator
                 n_unary += 1
+            elseif op isa BinaryTriuOperator
+                n_binary_U += 1
+            elseif op isa BinarySquaredOperator
+                n_binary_D += 1
+            else 
+                error("op must be UnaryOperator, BinarySquaredOperator or BinaryTriuOperator")
             end
         end
 
-        # Add operators in order
-        # 1. Undirected binary operators
         for op in operators
-            if op isa BinaryOperator && !op.is_directed
+            if op isa BinaryTriuOperator
                 push!(operator_list, op)
             end
         end
 
-        # 2. Directed binary operators
         for op in operators
-            if op isa BinaryOperator && op.is_directed
+            if op isa BinarySquaredOperator
                 push!(operator_list, op)
             end
         end
 
-        # 3. Unary operators
         for op in operators
             if op isa UnaryOperator
                 push!(operator_list, op)
@@ -154,9 +192,12 @@ mutable struct SymbolLayer
 
         out_dim = n_unary * in_dim + n_binary_U * n_triu + n_binary_D * in_dim_square
 
+        triu_idx = n_binary_U == 0 ? nothing : ConcreteRArray(get_triu_indices(in_dim))
+        squared_idx = n_binary_D == 0 ? nothing : ConcreteRArray(get_squared_indices(in_dim))
+
         layer = new(
             in_dim, out_dim, operators, n_binary_U, n_binary_D, n_unary,
-            operator_list, n_triu, in_dim_square, nothing, nothing
+            operator_list, n_triu, in_dim_square, nothing, nothing, triu_idx, squared_idx, nothing
         )
 
         init_offset(layer)
@@ -171,14 +212,16 @@ function get_out_dim_cum_ls(layer::SymbolLayer)
     end
 
     out_dim_ls = Int[]
-    for func in layer.operator_list
-        if func isa UnaryOperator
+    for op in layer.operator_list
+        if op isa UnaryOperator
             push!(out_dim_ls, layer.in_dim)
         else
-            if func.is_directed
+            if op isa BinarySquaredOperator
                 push!(out_dim_ls, layer.in_dim_square)
-            else
+            elseif op isa BinaryTriuOperator
                 push!(out_dim_ls, layer.n_triu)
+            else
+                error("Only support BinarySquaredOperator and BinaryTriuOperator in BinaryOperator")
             end
         end
     end
@@ -223,7 +266,7 @@ function get_offset_tensor(layer::SymbolLayer)
         if func isa UnaryOperator
             t = unary_tensor
         else
-            t = func.is_directed ? binary_D_tensor : binary_U_tensor
+            t = (func isa BinarySquaredOperator) ? binary_D_tensor : binary_U_tensor
         end
         len = size(t, 1)
         offset_tensor[start:(start + len - 1), :] = t
@@ -250,16 +293,49 @@ function get_op_and_offset(layer::SymbolLayer, index::Int)
     return layer.operator_list[op_idx], offset
 end
 
-function forward(layer::SymbolLayer, x::AbstractMatrix)
-    results = AbstractMatrix[]
+function forward(layer::SymbolLayer, xr::Reactant.ConcreteRArray)
+    n = layer.in_dim
+    results = Reactant.ConcreteRArray{T_kernel_compiling}[]
     for op in layer.operator_list
-        result = op.kernel(x)
-        push!(results, result)
+        if isa(op, UnaryOperator)
+            res = op.compiled_kernel(xr)
+        elseif isa(op, BinaryTriuOperator)
+            res = op.compiled_kernel(xr, n, layer.triu_idx)
+        elseif isa(op, BinarySquaredOperator)
+            res = op.compiled_kernel(xr, n, layer.squared_idx)
+        else
+            error("op must be UnaryOperator, BinaryTriuOperator or BinarySquaredOperator")
+        end
+        push!(results, res)
     end
-    return concat_arrays(results)
+    if layer.hcat_compiled == nothing
+        # compile the hcat
+        xr_ls = [Reactant.to_rarray(ones(T_kernel_compiling, 1, get_scale(op, layer.in_dim))) for op in layer.operator_list]
+        @info "compiling hcat..."
+        layer.hcat_compiled = @compile hcat(xr_ls...)
+        @info "hcat compiled!"
+    end
+    return layer.hcat_compiled(results...)
 end
 
-# PSRN implementation
+function compile_kernels!(layer::SymbolLayer)
+    for op in layer.operators
+
+        if op isa UnaryOperator
+            println("compiling unary operator $(op.name) ... $(layer.in_dim)")
+            op.compiled_kernel = compile_unary_kernel(layer.in_dim, op.kernel)
+        elseif op isa BinaryTriuOperator
+            println("compiling binary triu operator $(op.name) ... $(layer.in_dim)")
+            op.compiled_kernel = compile_binary_triu_kernel(layer.in_dim, op.kernel)
+        elseif op isa BinarySquaredOperator
+            println("compiling binary squared operator $(op.name) ... $(layer.in_dim)")
+            op.compiled_kernel = compile_binary_squared_kernel(layer.in_dim, op.kernel)
+        else
+            error("Unsupported operator type: $(typeof(op))")
+        end
+    end
+end
+
 mutable struct PSRN
     n_variables::Int
     operators::Vector{String}
@@ -269,6 +345,8 @@ mutable struct PSRN
     use_dr_mask::Bool
     current_expr_ls::Vector{Expression}
     options::Options
+    diff_compiled::CompiledKernel
+    sum_squared_add_compiled::CompiledKernel
 
     function PSRN(;
         n_variables::Int=1,
@@ -286,11 +364,32 @@ mutable struct PSRN
             end
 
             if i == 1
-                push!(layers, SymbolLayer(n_variables, operators))
+                layer = SymbolLayer(n_variables, operators)
             else
-                push!(layers, SymbolLayer(layers[end].out_dim, operators))
+                layer = SymbolLayer(layers[end].out_dim, operators)
             end
+            @info "compiling layer = $i / total $n_symbol_layers ..."
+            compile_kernels!(layer)
+            push!(layers, layer)
         end
+
+        @info "compiling PSRN.diff_compiled..."
+        diff(a,b) = a .- b
+        x = ones(T_kernel_compiling, 1, layers[end].out_dim)
+        y::T_kernel_compiling = 1
+        xr = Reactant.to_rarray(x)
+        yr = Reactant.to_rarray(y)
+        diff_compiled = @compile diff(xr,yr)
+        @info "compiling success!"
+
+        @info "compiling PSRN.sum_squared_add_compiled..."
+        sum_squared_add(s,d) = s .+ d.^2
+        x1 = ones(T_kernel_compiling, 1, layers[end].out_dim)
+        x2 = ones(T_kernel_compiling, 1, layers[end].out_dim)
+        x1r = Reactant.to_rarray(x1)
+        x2r = Reactant.to_rarray(x2)
+        sum_squared_add_compiled = @compile sum_squared_add(x1r, x2r)
+        @info "compiling success!"
 
         return new(
             n_variables,
@@ -301,58 +400,71 @@ mutable struct PSRN
             use_dr_mask,
             Expression[],
             options,
+            diff_compiled,
+            sum_squared_add_compiled
         )
     end
 end
 
 function PSRN_forward(model::PSRN, x::AbstractMatrix)
     h = x
-    for layer in model.layers
+    h = ConcreteRArray(h)
+    for (i, layer) in enumerate(model.layers)
         h = forward(layer, h)
     end
     return h
 end
 
-# Convenience function for getting the compiled version using Reactant
-function compile_psrn(model::PSRN, dummy_input::AbstractMatrix)
-    println("Compiling PSRN... ⏳")
-    println("dummy_input: ", typeof(dummy_input))
-    println("shape: ", size(dummy_input))
-
-    dummy_input = ConcreteRArray(dummy_input)
-    f = @compile PSRN_forward(model, dummy_input)
-    println("Compiling PSRN finished ✅")
-    return f
-end
-
 function get_best_expr_and_MSE_topk(
     model::PSRN,
     X::AbstractMatrix,
-    Y::Vector{Float32},
+    Y::Vector{T_kernel_compiling},
     n_top::Int
 )
     # Calculate MSE for all expressions
     batch_size = size(X, 1)
-    Y = Float32.(Y)
-    sum_squared_errors = zeros(Float32, 1, model.out_dim)
+    Y = T_kernel_compiling.(Y)
+    sum_squared_errors = zeros(T_kernel_compiling, 1, model.out_dim)
+    sum_squared_errors_R = Reactant.to_rarray(sum_squared_errors)
 
-    # Compute sum of squared errors
-    for i in 1:batch_size
-        x_sliced = X[i:i, :]
-        H = PSRN_forward(model, x_sliced)
-        diff = H .- Y[i]
-        sum_squared_errors .+= diff.^2
+    @info "forwarding time:"
+    @time for i in 1:batch_size
+        # @info "A"
+        x_sliced = X[i:i, :] # 0.000002 seconds
+        # @info "B"
+        HR = PSRN_forward(model, x_sliced) # 0.002210 seconds
+        # @info "C"
+        # diff = H .- Y[i] # 0.159074 seconds
+        diffR = model.diff_compiled(HR, Reactant.to_rarray(Y[i]))
+        # @info "D"
+        # @info "diffR"
+        # @info diffR
+        # sum_squared_errors += diff.^2 #  0.181533 seconds
+        sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR)
+        # @info "E"
     end
-
     # Calculate mean
+    sum_squared_errors = convert(Matrix, sum_squared_errors_R)
     mean_errors = sum_squared_errors ./ batch_size
-    indices = topk_indices(mean_errors, n_top)
+
+    # @info "mean_errors's top 10"
+    # @info mean_errors[:, 1:10]
+    @info "topk sort time:"
+    @time indices = topk_indices(mean_errors, n_top)
+
+    # @info "indices:"
+    # @info indices[1:10]
 
     # Get expressions for best indices
     expr_best_ls = Expression[]
     for i in indices
-        push!(expr_best_ls, get_expr(model, i))
+        expr = get_expr(model, i)
+        # @info expr
+        push!(expr_best_ls, expr)
     end
+
+    # @info "Best Expressions:"
+    # @info expr_best_ls[1:10]
 
     return expr_best_ls
 end
@@ -373,7 +485,7 @@ end
 
 function _get_expr(model::PSRN, index::Int, layer_idx::Int)
     if layer_idx < 1
-        return model.current_expr_ls[index]
+        return model.current_expr_ls[index + 1]
     end
 
     layer = model.layers[layer_idx]

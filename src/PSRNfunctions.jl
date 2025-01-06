@@ -1,22 +1,35 @@
 module PSRNfunctions
 
-# 一元操作的辅助函数
+
+import ..CoreModule.OperatorsModule:
+    plus,
+    sub,
+    mult,
+    square,
+    cube,
+    safe_pow,
+    safe_log,
+    safe_log2,
+    safe_log10,
+    safe_sqrt,
+    safe_acosh,
+    neg,
+    greater,
+    cond,
+    relu,
+    logical_or,
+    logical_and,
+    gamma
+
+using Reactant
+
+const T_kernel_compiling = Float32  # Default Float32
+const T_kernel_compiling_idx = Int64  # Default Int64
+
 function apply_unary(f::Function, x::AbstractMatrix)
     return f.(x)
 end
 
-# 生成上三角矩阵的索引
-function get_triu_indices(n::Int)
-    indices = Tuple{Int,Int}[]
-    for i in 1:n
-        for j in i:n
-            push!(indices, (i,j))
-        end
-    end
-    return indices
-end
-
-# 基本一元运算函数
 function identity_kernel!(x::AbstractMatrix)
     return copy(x)
 end
@@ -42,72 +55,134 @@ function exp_kernel!(x::AbstractMatrix)
 end
 
 function log_kernel!(x::AbstractMatrix)
-    return log.(x)
+    return safe_log.(x)
 end
 
 function sqrt_kernel!(x::AbstractMatrix)
-    return sqrt.(x)
+    return safe_sqrt.(x)
 end
 
-# 二元运算函数
 
-# 上三角加法: (n) -> (n*(n+1)/2)
-function add_kernel!(x::AbstractMatrix)
-    n = size(x, 2)
-    indices = get_triu_indices(n)
-    result = zeros(eltype(x), size(x, 1), length(indices))
+function get_triu_indices(n::Int)
+    num_indices = n * (n + 1) ÷ 2
     
-    for (idx, (i, j)) in enumerate(indices)
-        result[:, idx] = x[:, i] + x[:, j]
-    end
+    indices_matrix = Matrix{T_kernel_compiling_idx}(undef, num_indices, 2)
     
-    return result
-end
-
-# 上三角乘法: (n) -> (n*(n+1)/2)
-function mul_kernel!(x::AbstractMatrix)
-    n = size(x, 2)
-    indices = get_triu_indices(n)
-    result = zeros(eltype(x), size(x, 1), length(indices))
-    
-    for (idx, (i, j)) in enumerate(indices)
-        result[:, idx] = x[:, i] .* x[:, j]
-    end
-    
-    return result
-end
-
-# 广播除法: (n) -> (n*n)
-function div_kernel!(x::AbstractMatrix)
-    n = size(x, 2)
-    result = zeros(eltype(x), size(x, 1), n * n)
-    
+    idx = 1
     for i in 1:n
-        for j in 1:n
-            idx = (i-1)*n + j
-            result[:, idx] = x[:, i] ./ x[:, j]
+        for j in i:n
+            indices_matrix[idx, 1] = i
+            indices_matrix[idx, 2] = j
+            idx += 1
         end
     end
     
-    return result
+    return collect(transpose(indices_matrix))
 end
 
-# 广播减法: (n) -> (n*n)
-function sub_kernel!(x::AbstractMatrix)
-    n = size(x, 2)
-    result = zeros(eltype(x), size(x, 1), n * n)
+function get_squared_indices(n::Int)
+    num_indices = n * n
     
+    indices_matrix = Matrix{T_kernel_compiling_idx}(undef, num_indices, 2)
+    
+    idx = 1
     for i in 1:n
         for j in 1:n
-            idx = (i-1)*n + j
-            result[:, idx] = x[:, i] .- x[:, j]
+            indices_matrix[idx, 1] = i
+            indices_matrix[idx, 2] = j
+            idx += 1
         end
     end
     
-    return result
+    return collect(transpose(indices_matrix))
 end
 
-# 导出所有函数
+function add_kernel!(x::AbstractMatrix, n::Int, indices::AbstractMatrix)
+    l_idx = indices[1, :]
+    r_idx = indices[2, :]
+    l_value = x[l_idx]'
+    r_value = x[r_idx]'
+    res = l_value .+ r_value
+    return res
+end
+
+function mul_kernel!(x::AbstractMatrix, n::Int, indices::AbstractMatrix)
+    l_idx = indices[1, :]
+    r_idx = indices[2, :]
+    l_value = x[l_idx]'
+    r_value = x[r_idx]'
+    res = l_value .* r_value
+    return res
+end
+
+function sub_kernel!(x::AbstractMatrix, n::Int, indices::AbstractMatrix)
+    l_idx = indices[1, :]
+    r_idx = indices[2, :]
+    l_value = x[:, l_idx]
+    r_value = x[:, r_idx]
+    res = l_value .- r_value
+    return res
+end
+
+function div_kernel!(x::AbstractMatrix, n::Int, indices::AbstractMatrix)
+    l_idx = indices[1, :]
+    r_idx = indices[2, :]
+    l_value = x[:, l_idx]
+    r_value = x[:, r_idx]
+    res = l_value ./ r_value
+    return res
+end
+
+
+
+
+function compile_unary_kernel(input_dim::Int, func::Function)
+    input_array = Reactant.ConcreteRArray(ones(T_kernel_compiling, 1, input_dim))
+    
+    compiled_func = @compile func(input_array)
+    
+    return compiled_func
+end
+
+function compile_binary_triu_kernel(input_dim::Int, func::Function)
+    n = input_dim
+
+    x = rand(T_kernel_compiling, 1, n)
+    xr = Reactant.to_rarray(x)
+
+    triu = get_triu_indices(n) 
+    triur = Reactant.to_rarray(triu)
+
+    @info size(xr)
+    @info typeof(xr)
+    @info n
+    @info size(triur)
+    @info typeof(triur)
+
+    compiled_func = @compile func(xr, n, triur)
+
+    @info "compiled_func's name: \n\t\t $compiled_func"
+    
+    return compiled_func
+end
+
+function compile_binary_squared_kernel(input_dim::Int, func::Function)
+    n = input_dim
+
+    x = rand(T_kernel_compiling, 1, n)
+    xr = Reactant.to_rarray(x)
+
+    squared = get_squared_indices(n) 
+    squaredr = Reactant.to_rarray(squared)
+
+    compiled_func = @compile func(xr, n, squaredr)
+    
+    return compiled_func
+end
+
+export compile_unary_kernel, compile_binary_triu_kernel, compile_binary_squared_kernel
+export get_triu_indices, get_squared_indices
+
 export identity_kernel!,
     add_kernel!,
     mul_kernel!,
@@ -120,4 +195,6 @@ export identity_kernel!,
     exp_kernel!,
     log_kernel!,
     sqrt_kernel!
-end
+
+
+end # module

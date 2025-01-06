@@ -24,3 +24,4 @@ docs/src/index.md
 **/*.json
 LocalPreferences.toml
 git_contributions.py
+z_test_react

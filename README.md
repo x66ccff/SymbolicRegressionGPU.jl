@@ -21,6 +21,8 @@ SymbolicRegression.jl docs:
 git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
 ```
 
+[Install Julia](https://julialang.org/downloads/)
+
 ```julia
 (SymbolicRegression) pkg> instantiate
 ```

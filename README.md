@@ -13,7 +13,7 @@ SymbolicRegression.jl searches for symbolic expressions which optimize a particu
 SymbolicRegression.jl docs:
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://ai.damtp.cam.ac.uk/symbolicregression/dev/)
 
-# How to use SymbolicRegressionGPU.jl?
+# Quickstart
 
 ### 📥 Install
 

@@ -850,12 +850,12 @@ function select_top_subtrees(
     end
 
     while length(result) < n
-        current_num = rand(Float32)*((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1) # TODO for the rest of the slots, we use 1, -1, 2, -2, 3, -3, ...
+        should_multiply = rand(Bool)
+        current_num = should_multiply ? rand(Float32) * ((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1) : ((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1)
         is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
         val = is_positive ? Float32(current_num) : Float32(-current_num)
         push!(result, Node(; val=val))
     end
-
     return result
 end
 
@@ -1147,7 +1147,7 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 10
-        N_PSRN_INPUT = 4 # TODO this can be tuned
+        N_PSRN_INPUT = 15 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
@@ -1156,7 +1156,7 @@ function _main_search_loop!(
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Sub", "Div", "Identity"],
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
-            n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
+            n_symbol_layers=2, # TODO if use 3 layer, easily crash (segfault), don't know why
             options=options,
             max_samples=20,
             # max_samples = 10

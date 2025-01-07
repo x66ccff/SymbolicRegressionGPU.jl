@@ -1,5 +1,5 @@
 > [!WARNING]  
-> This package is under active development at the moment and may change its API and supported end systems at any time. End-users are advised to wait until a corresponding release with broader availability is made. 
+> This package is under active development at the moment and may change its API and supported end systems at any time. End-users are advised to wait until a corresponding release with broader availability is made. Package developers are suggested to try out Reactant for integration, but should be advised of the same risks.
 
 
 # 🚀 SymbolicRegressionGPU.jl 
@@ -18,16 +18,44 @@ SymbolicRegression.jl docs:
 
 # How to use SymbolicRegressionGPU.jl?
 
-### 📥 Install
+### 📥 1. clone this repo 
 
 ```bash
 git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
 ```
 
+### 📦 2. download libtorch and then unzip, place `libtorch` into `THArrays.jl/csrc`
+```bash
+wget https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip
+unzip libtorch*.zip
+mv libtorch SymbolicRegressionGPU.jl/THArrays.jl/csrc
+```
+### 🔧 3. install THArrays 
+see https://github.com/compintell/THArrays.jl/ for more details
+
+1. Go to the project directory where THArrays.jl is located
+2. Set the development environment variable:
+```bash
+cd SymbolicRegressionGPU.jl
+export THARRAYS_DEV=1
+```
+3. Enter Julia REPL and activate the project environment:
+```julia
+julia> ]
+(@v1.x) pkg> activate .
+```
+4. Install and build THArrays:
+
+```bash
+export CUDAARCHS="native" # For nvidia GPUs
+```
+
 ```julia
 (SymbolicRegression) pkg> instantiate
+(SymbolicRegression) pkg> dev ./THArrays.jl
+(SymbolicRegression) pkg> build THArrays
 ```
-### 🏃‍♂️ Run 
+### 🏃‍♂️ 4. Run 
 ```
 export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
 

@@ -1144,7 +1144,7 @@ function _main_search_loop!(
 
     println(options)
 
-    if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
+    if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 10
         N_PSRN_INPUT = 15 # TODO this can be tuned
@@ -1239,7 +1239,7 @@ function _main_search_loop!(
 
             dominating_trees = [member.tree for member in dominating]
 
-            if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
+            if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
                 start_psrn_task(
                     psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT
                 )
@@ -1314,18 +1314,18 @@ function _main_search_loop!(
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
             move_window!(state.all_running_search_statistics[j])
-            # if !isnothing(progress_bar)
-            #     head_node_occupation = estimate_work_fraction(resource_monitor)
-            #     update_progress_bar!(
-            #         progress_bar,
-            #         only(state.halls_of_fame),
-            #         only(datasets),
-            #         options,
-            #         equation_speed,
-            #         head_node_occupation,
-            #         ropt.parallelism,
-            #     )
-            # end
+            if !isnothing(progress_bar)
+                head_node_occupation = estimate_work_fraction(resource_monitor)
+                update_progress_bar!(
+                    progress_bar,
+                    only(state.halls_of_fame),
+                    only(datasets),
+                    options,
+                    equation_speed,
+                    head_node_occupation,
+                    ropt.parallelism,
+                )
+            end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end

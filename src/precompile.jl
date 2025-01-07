@@ -89,5 +89,9 @@ function do_precompilation(::Val{mode}) where {mode}
         end
     end
 
+    GC.gc()
+    Base.Threads.@threads for i in 1:Threads.nthreads()
+        GC.gc()
+    end
     return nothing
 end

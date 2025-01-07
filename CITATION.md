@@ -1,5 +1,20 @@
 # Citing
 
+To cite SymbolicRegressionGPU.jl, please use the following BibTeX entry:
+
+```bibtex
+@misc{SymbolicRegressionGPU.jl,
+  author = {
+    Ruan, Kai AND
+    Cranmer, Miles AND
+    Sun, Hao
+  },
+  title = {SymbolicRegressionGPU.jl}, 
+  year = {2024},
+  url = {https://github.com/x66ccff/SymbolicRegressionGPU.jl}
+}
+```
+
 To cite SymbolicRegression.jl or PySR, please use the following BibTeX entry:
 
 ```bibtex

@@ -3,7 +3,7 @@
 
 💻 [PSRN](https://github.com/intell-sci-comput/PTS) (Parallel Symbolic Regression Network) enhanced SymbolicRegression.jl for **faster**, large-scale parallel symbolic evaluations on GPUs. _Based on [SymbolicRegression.jl](https://github.com/MilesCranmer/SymbolicRegression.jl)_.
 
-<!-- prettier-ignore-start -->
+In this repository, the implementation of PSRN is based on the high-performance _[Reactant.jl](https://github.com/EnzymeAD/Reactant.jl)_ library, which can automatically recognize device backends, including CPU, GPU, and TPU, without the need for manual device specification.
 
 
 ## 🔍 SymbolicRegression.jl

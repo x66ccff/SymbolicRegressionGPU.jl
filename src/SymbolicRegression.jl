@@ -812,7 +812,7 @@ mutable struct PSRNManager
         operators::Vector{String},
         n_symbol_layers::Int,
         options::Options,
-        max_samples::Int=100, # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
+        max_samples::Int=20, # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
     )
         psrn = PSRN(;
             n_variables=N_PSRN_INPUT,
@@ -840,7 +840,7 @@ function select_top_subtrees(
     )
 
     sorted_subtrees = sort(
-        collect(filtered_subtrees); by=x -> (x[2] * (1.0 + 0.3 * randn())), rev=true
+        collect(filtered_subtrees); by=x -> (x[2] * (1.0 + 0.5 * randn())), rev=true
     ) # TODO the 0.3 can be tuned
 
     result = Node[]
@@ -850,7 +850,7 @@ function select_top_subtrees(
     end
 
     while length(result) < n
-        current_num = (length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1 # TODO for the rest of the slots, we use 1, -1, 2, -2, 3, -3, ...
+        current_num = rand(Float32)*((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1) # TODO for the rest of the slots, we use 1, -1, 2, -2, 3, -3, ...
         is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
         val = is_positive ? Float32(current_num) : Float32(-current_num)
         push!(result, Node(; val=val))
@@ -995,6 +995,11 @@ function start_psrn_task(
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
 
             # @info "Selected subtrees:" top_subtrees
+            # @info "👇"
+            # for expr in top_subtrees
+            #     @info expr
+            # end 
+            # @info "👆"
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
@@ -1142,17 +1147,18 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 10
-        N_PSRN_INPUT = 20 # TODO this can be tuned
+        N_PSRN_INPUT = 4 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
-            operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
+            operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
+            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Sub", "Div", "Identity"],
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
-            n_symbol_layers=2, # TODO if use 3 layer, easily crash (segfault), don't know why
+            n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
             options=options,
-            max_samples=100,
+            max_samples=20,
             # max_samples = 10
         )
     else
@@ -1308,18 +1314,18 @@ function _main_search_loop!(
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
             move_window!(state.all_running_search_statistics[j])
-            if !isnothing(progress_bar)
-                head_node_occupation = estimate_work_fraction(resource_monitor)
-                update_progress_bar!(
-                    progress_bar,
-                    only(state.halls_of_fame),
-                    only(datasets),
-                    options,
-                    equation_speed,
-                    head_node_occupation,
-                    ropt.parallelism,
-                )
-            end
+            # if !isnothing(progress_bar)
+            #     head_node_occupation = estimate_work_fraction(resource_monitor)
+            #     update_progress_bar!(
+            #         progress_bar,
+            #         only(state.halls_of_fame),
+            #         only(datasets),
+            #         options,
+            #         equation_speed,
+            #         head_node_occupation,
+            #         ropt.parallelism,
+            #     )
+            # end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end

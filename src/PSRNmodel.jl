@@ -380,12 +380,13 @@ mutable struct PSRN
         end
 
         @info "⏳compiling PSRN.diff_compiled..."
-        diff(a,b) = a .- b
-        x = ones(T_kernel_compiling, 1, layers[end].out_dim)
-        y::T_kernel_compiling = 1
+        d(a,b) = a .- b
+        x = rand(T_kernel_compiling, 1, layers[end].out_dim)
+        # y = rand(T_kernel_compiling, 1, layers[end].out_dim) # TODO 
+        y::T_kernel_compiling = 666.666
         xr = Reactant.to_rarray(x)
-        yr = Reactant.to_rarray(y)
-        diff_compiled = @compile diff(xr,yr)
+        # yr = Reactant.to_rarray(y)
+        diff_compiled = @compile d(xr,y)
         @info "👌compiling success!"
 
         @info "⏳compiling PSRN.sum_squared_add_compiled..."
@@ -459,7 +460,7 @@ function get_best_expr_and_MSE_topk(
     batch_size = size(X, 1)
     Y = T_kernel_compiling.(Y)
     sum_squared_errors = zeros(T_kernel_compiling, 1, model.out_dim) # TODO TEST
-    # sum_squared_errors = rand(T_kernel_compiling, 1, model.out_dim) # TODO TEST
+    # sum_squared_errors = rand(T_kernel_compiling, 1, model.out_dim) .* T_kernel_compiling(0.000001) # TODO TEST
 
     sum_squared_errors_R = Reactant.to_rarray(sum_squared_errors)
 
@@ -467,8 +468,10 @@ function get_best_expr_and_MSE_topk(
     @time for i in 1:batch_size
         x_sliced = X[i:i, :]
         HR = PSRN_forward(model, x_sliced)
-        diffR = model.diff_compiled(HR, Reactant.to_rarray(Y[i]))
-        sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR) # diffR是0
+        # broadcasted_Yi = model.f_fill(similar(sum_squared_errors_R), Y[i])
+        diffR = model.diff_compiled(HR, Y[i])
+        # diffR = HR .- Y[i]
+        sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR) # diffR是0 TODO TEST
     end
     # Calculate mean
 
@@ -510,17 +513,18 @@ function get_best_expr_and_MSE_topk(
     # @info "indices:"
     # @info indices[1:10]
 
+    @info "Best Expressions:"
     # Get expressions for best indices
     expr_best_ls = Expression[]
     for i in indices
-        expr = get_expr(model, Int64(i+1)) # new
+        # expr = get_expr(model, Int64(i+1)) # new
+        expr = get_expr(model, Int64(i)) # new
         # expr = get_expr(model, i) # old
         # @info expr
         push!(expr_best_ls, expr)
     end
 
-    @info "Best Expressions:"
-    @info expr_best_ls[1:10]
+    
 
     @info "GC.......🧹"
     GC.gc()

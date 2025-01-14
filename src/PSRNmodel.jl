@@ -311,7 +311,7 @@ function forward(layer::SymbolLayer, xr::Reactant.ConcreteRArray)
     if layer.hcat_compiled == nothing
         # compile the hcat
         xr_ls = [Reactant.to_rarray(ones(T_kernel_compiling, 1, get_scale(op, layer.in_dim))) for op in layer.operator_list]
-        @info "compiling hcat..."
+        @info "⏳compiling hcat..."
         layer.hcat_compiled = @compile hcat(xr_ls...)
         @info "hcat compiled!"
     end
@@ -322,13 +322,13 @@ function compile_kernels!(layer::SymbolLayer)
     for op in layer.operators
 
         if op isa UnaryOperator
-            println("compiling unary operator $(op.name) ... $(layer.in_dim)")
+            println("⏳compiling unary operator $(op.name) ... $(layer.in_dim)")
             op.compiled_kernel = compile_unary_kernel(layer.in_dim, op.kernel)
         elseif op isa BinaryTriuOperator
-            println("compiling binary triu operator $(op.name) ... $(layer.in_dim)")
+            println("⏳compiling binary triu operator $(op.name) ... $(layer.in_dim)")
             op.compiled_kernel = compile_binary_triu_kernel(layer.in_dim, op.kernel)
         elseif op isa BinarySquaredOperator
-            println("compiling binary squared operator $(op.name) ... $(layer.in_dim)")
+            println("⏳compiling binary squared operator $(op.name) ... $(layer.in_dim)")
             op.compiled_kernel = compile_binary_squared_kernel(layer.in_dim, op.kernel)
         else
             error("Unsupported operator type: $(typeof(op))")
@@ -345,15 +345,21 @@ mutable struct PSRN
     use_dr_mask::Bool
     current_expr_ls::Vector{Expression}
     options::Options
+    PSRN_topk::Int
     diff_compiled::CompiledKernel
     sum_squared_add_compiled::CompiledKernel
+    top_k_compiled::CompiledKernel
+    f_select::CompiledKernel
+    f_is_finite::CompiledKernel
+    f_fill::CompiledKernel
 
     function PSRN(;
-        n_variables::Int=1,
-        operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg"],
-        n_symbol_layers::Int=3,
+        n_variables::Int,
+        operators::Vector{String},
+        n_symbol_layers::Int,
         dr_mask::Union{Vector{Bool},Nothing}=nothing,
         options::Options=Options(),
+        PSRN_topk::Int,
     )
         layers = Union{SymbolLayer,DRLayer}[]
         use_dr_mask = !isnothing(dr_mask)
@@ -368,28 +374,53 @@ mutable struct PSRN
             else
                 layer = SymbolLayer(layers[end].out_dim, operators)
             end
-            @info "compiling layer = $i / total $n_symbol_layers ..."
+            @info "⏳compiling layer = $i / total $n_symbol_layers ..."
             compile_kernels!(layer)
             push!(layers, layer)
         end
 
-        @info "compiling PSRN.diff_compiled..."
-        diff(a,b) = a .- b
-        x = ones(T_kernel_compiling, 1, layers[end].out_dim)
-        y::T_kernel_compiling = 1
+        @info "⏳compiling PSRN.diff_compiled..."
+        d(a,b) = a .- b
+        x = rand(T_kernel_compiling, 1, layers[end].out_dim)
+        # y = rand(T_kernel_compiling, 1, layers[end].out_dim) # TODO 
+        y::T_kernel_compiling = 666.666
         xr = Reactant.to_rarray(x)
-        yr = Reactant.to_rarray(y)
-        diff_compiled = @compile diff(xr,yr)
-        @info "compiling success!"
+        # yr = Reactant.to_rarray(y)
+        diff_compiled = @compile d(xr,y)
+        @info "👌compiling success!"
 
-        @info "compiling PSRN.sum_squared_add_compiled..."
+        @info "⏳compiling PSRN.sum_squared_add_compiled..."
         sum_squared_add(s,d) = s .+ d.^2
         x1 = ones(T_kernel_compiling, 1, layers[end].out_dim)
         x2 = ones(T_kernel_compiling, 1, layers[end].out_dim)
         x1r = Reactant.to_rarray(x1)
         x2r = Reactant.to_rarray(x2)
         sum_squared_add_compiled = @compile sum_squared_add(x1r, x2r)
-        @info "compiling success!"
+        @info "👌compiling success!"
+
+        # https://github.com/EnzymeAD/Reactant.jl/issues/485
+        @info "⏳compiling PSRN.top_k_compiled..."
+        x3 = ones(T_kernel_compiling, 1, layers[end].out_dim)
+        x3r = Reactant.to_rarray(x3)
+        top_k_compiled = @compile Reactant.Ops.top_k(x3r, PSRN_topk)
+        @info "👌compiling success!"
+
+
+        # https://github.com/EnzymeAD/Reactant.jl/issues/524
+        @info "⏳compiling PSRN.set_nan_to_M_compiled..."
+        M::T_kernel_compiling = 1.0*10^9
+        x4 = rand(T_kernel_compiling, 1, layers[end].out_dim)
+        x4[2] = NaN
+        x4r = Reactant.to_rarray(x4)
+
+        f_is_finite = @compile Reactant.Ops.is_finite(x4r)
+        f_fill = @compile fill!(similar(x4r), M)
+        f_select = @compile Reactant.Ops.select(f_is_finite(x4r), x4r, f_fill(similar(x4r), M))
+        
+        # f_select(f_is_finite(x4r), x4r, f_fill(similar(x4r), M))
+        @info "👌compiling success!"
+
+
 
         return new(
             n_variables,
@@ -400,8 +431,13 @@ mutable struct PSRN
             use_dr_mask,
             Expression[],
             options,
+            PSRN_topk,
             diff_compiled,
-            sum_squared_add_compiled
+            sum_squared_add_compiled,
+            top_k_compiled,
+            f_select,
+            f_is_finite,
+            f_fill
         )
     end
 end
@@ -418,53 +454,81 @@ end
 function get_best_expr_and_MSE_topk(
     model::PSRN,
     X::AbstractMatrix,
-    Y::Vector{T_kernel_compiling},
-    n_top::Int
+    Y::Vector{T_kernel_compiling}
 )
     # Calculate MSE for all expressions
     batch_size = size(X, 1)
     Y = T_kernel_compiling.(Y)
-    sum_squared_errors = zeros(T_kernel_compiling, 1, model.out_dim)
+    sum_squared_errors = zeros(T_kernel_compiling, 1, model.out_dim) # TODO TEST
+    # sum_squared_errors = rand(T_kernel_compiling, 1, model.out_dim) .* T_kernel_compiling(0.000001) # TODO TEST
+
     sum_squared_errors_R = Reactant.to_rarray(sum_squared_errors)
 
     @info "forwarding time:"
     @time for i in 1:batch_size
-        # @info "A"
-        x_sliced = X[i:i, :] # 0.000002 seconds
-        # @info "B"
-        HR = PSRN_forward(model, x_sliced) # 0.002210 seconds
-        # @info "C"
-        # diff = H .- Y[i] # 0.159074 seconds
-        diffR = model.diff_compiled(HR, Reactant.to_rarray(Y[i]))
-        # @info "D"
-        # @info "diffR"
-        # @info diffR
-        # sum_squared_errors += diff.^2 #  0.181533 seconds
-        sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR)
-        # @info "E"
+        x_sliced = X[i:i, :]
+        HR = PSRN_forward(model, x_sliced)
+        # broadcasted_Yi = model.f_fill(similar(sum_squared_errors_R), Y[i])
+        diffR = model.diff_compiled(HR, Y[i])
+        # diffR = HR .- Y[i]
+        sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR) # diffR是0 TODO TEST
     end
     # Calculate mean
-    sum_squared_errors = convert(Matrix, sum_squared_errors_R)
-    mean_errors = sum_squared_errors ./ batch_size
+
+    # old
+    # sum_squared_errors = convert(Matrix, sum_squared_errors_R) # (1, 100000)
+    # mean_errors = sum_squared_errors ./ batch_size
+
+
+
+    # new 
+    @info "fill nan time:"
+    @time sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
+                                        sum_squared_errors_R,
+                                        model.f_fill(similar(sum_squared_errors_R), 1f9))
+
+    # new
+    # mean_errors_R = sum_squared_errors_R ./ batch_size
+    mean_errors_R = sum_squared_errors_R
 
     # @info "mean_errors's top 10"
     # @info mean_errors[:, 1:10]
+
+    # old
+    # @info "topk time:"
+    # @time indices = topk_indices(mean_errors, model.PSRN_topk)
+
+    # @info "mean_errors_R"
+    # @info mean_errors_R[1:100]
+
+    # new
     @info "topk sort time:"
-    @time indices = topk_indices(mean_errors, n_top)
+    @time val_R, idx_R = model.top_k_compiled(-mean_errors_R, model.PSRN_topk)
+    @info "val_R"
+    @info val_R
+    @info "idx_R"
+    @info idx_R
+    indices = vec(convert(Matrix, idx_R))
 
     # @info "indices:"
     # @info indices[1:10]
 
+    @info "Best Expressions:"
     # Get expressions for best indices
     expr_best_ls = Expression[]
     for i in indices
-        expr = get_expr(model, i)
+        # expr = get_expr(model, Int64(i+1)) # new
+        expr = get_expr(model, Int64(i)) # new
+        # expr = get_expr(model, i) # old
         # @info expr
         push!(expr_best_ls, expr)
     end
 
-    # @info "Best Expressions:"
-    # @info expr_best_ls[1:10]
+    
+
+    @info "GC.......🧹"
+    GC.gc()
+    @info "GC sucess🧹"
 
     return expr_best_ls
 end

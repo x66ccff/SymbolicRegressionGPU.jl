@@ -167,6 +167,10 @@ using DynamicExpressions: with_type_parameters
 using DynamicDiff: D
 using Compat: @compat, Fix
 
+using Reactant: get_memory_allocated_gb, print_largest_arrays
+# https://github.com/x66ccff/Reactant.jl
+# https://github.com/EnzymeAD/Reactant.jl/pull/515
+
 #! format: off
 @compat(
     public,
@@ -806,6 +810,7 @@ mutable struct PSRNManager
     N_PSRN_INPUT::Int
     net::PSRN
     max_samples::Int
+    PSRN_topk::Int
 
     function PSRNManager(;
         N_PSRN_INPUT::Int,
@@ -813,6 +818,9 @@ mutable struct PSRNManager
         n_symbol_layers::Int,
         options::Options,
         max_samples::Int=20, # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
+        PSRN_topk::Int=50,
+        # PSRN_topk::Int=300,
+
     )
         psrn = PSRN(;
             n_variables=N_PSRN_INPUT,
@@ -820,10 +828,11 @@ mutable struct PSRNManager
             n_symbol_layers=n_symbol_layers,
             dr_mask=nothing,
             options=options,
+            PSRN_topk=PSRN_topk
         )
 
         return new(
-            Channel{Vector{Expression}}(32), nothing, 0, N_PSRN_INPUT, psrn, max_samples
+            Channel{Vector{Expression}}(1000), nothing, 0, N_PSRN_INPUT, psrn, max_samples
         )
     end
 end
@@ -988,7 +997,11 @@ function start_psrn_task(
     return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
         try
             manager.call_count += 1
-            @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
+            @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
+            
+            @info "👇🔥🔥🔥🔥🔥🔥🔥🔥"
+            print_largest_arrays(100)
+            @info "👆🔥🔥🔥🔥🔥🔥🔥🔥"
 
             common_subtrees = analyze_common_subtrees(dominating_trees)
 
@@ -1063,7 +1076,7 @@ function start_psrn_task(
             end
 
             best_expressions = get_best_expr_and_MSE_topk(
-                manager.net, X_mapped_sampled, y_sampled, 100
+                manager.net, X_mapped_sampled, y_sampled
             )
 
             put!(manager.channel, best_expressions)
@@ -1146,20 +1159,22 @@ function _main_search_loop!(
 
     if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
-        # N_PSRN_INPUT = 10
-        N_PSRN_INPUT = 15 # TODO this can be tuned
+        # N_PSRN_INPUT = 15
+        # N_PSRN_INPUT = 20 # TODO this can be tuned
+        N_PSRN_INPUT = 3 # TODO this can be tuned
+
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
             operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
             # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-            # operators = ["Sub", "Div", "Identity"],
+            # operators = ["Add", "Mul", "Identity"],
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
-            n_symbol_layers=2, # TODO if use 3 layer, easily crash (segfault), don't know why
+            n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
             options=options,
             max_samples=20,
-            # max_samples = 10
+            # max_samples = 200
         )
     else
         println("Not use PSRN")

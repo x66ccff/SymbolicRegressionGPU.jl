@@ -1,4 +1,5 @@
 # export JULIA_NUM_THREADS=4
+# julia --project=. example.jl --verbose --debug-precompile
 # julia --project=. example.jl
 
 using SymbolicRegression
@@ -10,7 +11,10 @@ function main()
 
 
     # y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
+    # y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2.34 .* exp.(X[3, :] .* X[2, :] .^ 5) # harder problem
+    
     y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
+    y = Vector{Float32}(y)
 
     options = SymbolicRegression.Options(;
         binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin]

@@ -2,6 +2,7 @@ using THArrays
 using Test
 
 @testset "Tensor Array interface (except indexing)" begin
+
     @testset "Tensor array interface" begin
         ary = rand(2, 3)
         ten = Tensor(ary)

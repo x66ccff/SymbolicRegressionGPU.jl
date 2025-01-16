@@ -3,6 +3,7 @@ const TORCH_LIB_DIR = joinpath(PROJECT_DIR, "csrc/libtorch/lib")
 const TORCH_LIB_BUILD_DIR = joinpath(PROJECT_DIR, "deps/lib")
 const JULIA_THC_GENERATOR = joinpath(PROJECT_DIR, "src/thc/thc-generator.jl")
 
+
 function build_locally()
     LIBTORCH_URL = if Sys.islinux()
         "https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcpu.zip"
@@ -28,6 +29,7 @@ function build_locally()
         run(`make torch_capi`)
     end
 end
+
 
 function include_remote_script(version_str)
     # build_script_url = "https://github.com/compintell/THArrays.jl/releases/download/v$(version_str)/build_TorchCAPIDylib.v$(version_str).jl"
@@ -60,9 +62,7 @@ function get_version_str()
         lines = readlines(file)
         for line in lines
             m = match(version_reg, line)
-            if isa(m, RegexMatch)
-                return m.captures[1]
-            end
+            if isa(m, RegexMatch) return m.captures[1] end
         end
     end
 end

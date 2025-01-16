@@ -18,12 +18,21 @@ const libtorch_dtype_reverse_dict = Dict{DataType,Int}(
     v => k for (k, v) in libtorch_dtype_dict
 )
 
-function generate_triu_sum_script()
+function generate_triu_sum_script_legacy()
     return """
     def main(x):
         in_dim = x.size(1)
         indices = torch.triu_indices(in_dim, in_dim, offset=0)
         return x[:, indices[0]] + x[:, indices[1]]
+    """
+end
+
+function generate_triu_sum_script()
+    return """
+    def main(x):
+        left = x.view(1, -1, 1)
+        right = x.view(1, 1, -1)
+        return (left + right).view(1, -1)
     """
 end
 
@@ -33,7 +42,8 @@ function triu_sum(tensor::Tensor)
     return TRIU_SUM_SCRIPT.main(tensor)
 end
 
-function generate_triu_mul_script()
+
+function generate_triu_mul_script_legacy()
     return """
     def main(x):
         in_dim = x.size(1)
@@ -41,6 +51,16 @@ function generate_triu_mul_script()
         return x[:, indices[0]] * x[:, indices[1]]
     """
 end
+
+function generate_triu_mul_script()
+    return """
+    def main(x):
+        left = x.view(1, -1, 1)
+        right = x.view(1, 1, -1)
+        return (left * right).view(1, -1)
+    """
+end
+
 
 const TRIU_MUL_SCRIPT = THJIT.compile(generate_triu_mul_script())
 

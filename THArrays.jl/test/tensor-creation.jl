@@ -2,6 +2,7 @@ using THArrays
 using Test
 
 @testset "Tensor Creation" begin
+
     @testset "Creation with Array" begin
         ary = rand(2, 3)
         @test Tensor(ary) == Tensor(ary)
@@ -17,7 +18,7 @@ using Test
 
     @testset "Creation with Array (copying data)" begin
         ary = rand(2, 3)
-        t = Tensor(ary; detach=true)
+        t = Tensor(ary, detach=true)
         THArrays.THC.sin!(t)
         @test isapprox(convert(Array, t), sin.(ary), atol=0.001)
     end

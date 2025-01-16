@@ -51,12 +51,14 @@ const OPERATORS = Dict{String,Operator}(
     "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
     "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
     "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
-    "Add" => BinaryOperator("Add", add_kernel!, false, +),
-    "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
+    # "Add" => BinaryOperator("Add", add_kernel!, false, +),
+    # "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
+    "Add" => BinaryOperator("Add", add_kernel!, true, +),
+    "Mul" => BinaryOperator("Mul", mul_kernel!, true, *),
     "Div" => BinaryOperator("Div", div_kernel!, true, /),
     "Sub" => BinaryOperator("Sub", sub_kernel!, true, -),
     "Inv" => UnaryOperator("Inv", inv_kernel!, true, x -> 1 / x),
-    "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> -x),
+    "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> 0 - x),
 )
 
 # generate torchscript code for concatenating tensors
@@ -65,7 +67,8 @@ function generate_cat_script(n::Int)
     tensors = "(" * join(('a':'z')[1:n], ", ") * ")"
     return """
     def main($args):
-        return torch.cat($tensors, dim=1)
+        result = torch.cat($tensors, dim=1)
+        return result
     """
 end
 
@@ -89,7 +92,8 @@ end
 function generate_topk_script(k::Int)
     return """
     def main(x):
-        return torch.topk(x, k=$(k), dim=1, largest=False, sorted=True)[1].squeeze()
+        result = torch.topk(x, k=$(k), dim=1, largest=False, sorted=True)[1].squeeze()
+        return result
     """
 end
 
@@ -308,7 +312,8 @@ function forward(layer::SymbolLayer, x::Tensor)
         result = op.kernel(x)
         push!(results, result)
     end
-    return concat_tensors(results)
+    res = concat_tensors(results)
+    return res
 end
 
 # PSRN implementation
@@ -400,17 +405,23 @@ function get_best_expr_and_MSE_topk(
     batch_size = size(X, 1)
     Y = Float32.(Y) # for saving memory
     # sum_squared_errors = Tensor(zeros((1, model.out_dim)))
-    sum_squared_errors = Tensor(zeros(Float32, (1, model.out_dim))) # for saving memory
 
-    sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
+    @time sum_squared_errors = Tensor(zeros(Float32, (1, model.out_dim))) # for saving memory
+
+    @time sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
 
     # Compute sum of squared errors
     for i in 1:batch_size
         x_sliced = X[i:i, :]
+
         x_sliced = to(x_sliced, CUDA(device_id))
-        H = PSRN_forward(model, x_sliced)
+
+        H = PSRN_forward(model, x_sliced) #   0.150774 seconds
+
         diff = H .- Y[i]
+
         square = diff * diff # don't use ^2, because it will get Float64
+
         sum_squared_errors += square
     end
 
@@ -444,6 +455,8 @@ function get_best_expr_and_MSE_topk(
     # println(expr)
     # end
     # println("-"^20)
+
+    # GC.gc()
 
     return expr_best_ls
 end

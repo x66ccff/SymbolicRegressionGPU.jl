@@ -6,7 +6,8 @@ using Test
 using THArrays.TrackerAD: _th, _tr
 
 @testset "Torch and Tracker Mixed Gradient" begin
-    Random.seed!(0)
+
+    Random.seed!(0);
 
     a = rand(3, 2)
     b = rand(3, 2)
@@ -39,4 +40,5 @@ using THArrays.TrackerAD: _th, _tr
         # @show b1, b2, b3, b4, b5
         @test b1 == b2 == b3 == b4 == b5
     end
+
 end

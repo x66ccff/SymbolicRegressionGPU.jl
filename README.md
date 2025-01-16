@@ -20,7 +20,7 @@ SymbolicRegression.jl docs:
 git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
 ```
 
-### 📦 2. Auto install libtorch and [THArrays.jl](https://github.com/compintell/THArrays.jl/)
+### 📦 2. Auto install [libtorch](https://pytorch.org/cppdocs/installing.html) and [THArrays.jl](https://github.com/compintell/THArrays.jl/)
 
 ```bash
 chmod +x install.sh

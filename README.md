@@ -48,9 +48,9 @@ export CUDAARCHS="native" # For nvidia GPUs
 ```
 
 ```julia
-(SymbolicRegression) pkg> instantiate
 (SymbolicRegression) pkg> dev ./THArrays.jl
 (SymbolicRegression) pkg> build THArrays
+(SymbolicRegression) pkg> instantiate
 ```
 ### 🏃‍♂️ 4. Run 
 ```

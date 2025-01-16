@@ -999,13 +999,12 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
             
-            @info "👇🔥🔥🔥🔥🔥🔥🔥🔥"
-            print_largest_arrays(100)
-            @info "👆🔥🔥🔥🔥🔥🔥🔥🔥"
 
-            common_subtrees = analyze_common_subtrees(dominating_trees)
+            @info "analyze_common_subtrees time"
+            @time common_subtrees = analyze_common_subtrees(dominating_trees)
 
-            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
+            @info "select_top_subtrees time"
+            @time top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
 
             # @info "Selected subtrees:" top_subtrees
             # @info "👇"
@@ -1014,11 +1013,13 @@ function start_psrn_task(
             # end 
             # @info "👆"
 
-            X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
+            @info "evaluate_subtrees time"
+            @time X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
             # add downsampling 
+            @info "downsampling time"
             n_samples = size(X_mapped, 1)
-            if n_samples > manager.max_samples
+            @time if n_samples > manager.max_samples
                 # random sample
                 sample_indices = randperm(n_samples)[1:(manager.max_samples)]
                 X_mapped_sampled = X_mapped[sample_indices, :]
@@ -1046,9 +1047,10 @@ function start_psrn_task(
             # y_sampled = to(y_sampled, CUDA(0))
 
             # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
+            @info "set current_expr_ls time"
             n_variables = size(X_mapped_sampled, 2)
             variable_names = ["x$i" for i in 1:n_variables]
-            manager.net.current_expr_ls = if isnothing(top_subtrees)
+            @time manager.net.current_expr_ls = if isnothing(top_subtrees)
                 # Variable expressions are used by default
                 [
                     Expression(
@@ -1079,7 +1081,8 @@ function start_psrn_task(
                 manager.net, X_mapped_sampled, y_sampled
             )
 
-            put!(manager.channel, best_expressions)
+            @info "put channel time"
+            @time put!(manager.channel, best_expressions)
 
             # @info "best_expressions: $best_expressions"
         catch e
@@ -1172,9 +1175,7 @@ function _main_search_loop!(
             # operators = ["Add", "Mul", "Identity"],
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
             n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
-            options=options,
-            max_samples=20,
-            # max_samples = 200
+            options=options
         )
     else
         println("Not use PSRN")
@@ -1329,18 +1330,18 @@ function _main_search_loop!(
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
             move_window!(state.all_running_search_statistics[j])
-            if !isnothing(progress_bar)
-                head_node_occupation = estimate_work_fraction(resource_monitor)
-                update_progress_bar!(
-                    progress_bar,
-                    only(state.halls_of_fame),
-                    only(datasets),
-                    options,
-                    equation_speed,
-                    head_node_occupation,
-                    ropt.parallelism,
-                )
-            end
+            # if !isnothing(progress_bar)
+            #     head_node_occupation = estimate_work_fraction(resource_monitor)
+            #     update_progress_bar!(
+            #         progress_bar,
+            #         only(state.halls_of_fame),
+            #         only(datasets),
+            #         options,
+            #         equation_speed,
+            #         head_node_occupation,
+            #         ropt.parallelism,
+            #     )
+            # end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end

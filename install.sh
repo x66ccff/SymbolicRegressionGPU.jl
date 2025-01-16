@@ -6,6 +6,12 @@ if ! command -v julia &> /dev/null; then
     exit 1
 fi
 
+# Check if CMake is installed
+if ! command -v cmake &> /dev/null; then
+    echo "❌ CMake is not installed or not in your PATH. Please install CMake and try again."
+    exit 1
+fi
+
 # # Step 1: Clone the repository
 # echo "📥 Cloning the repository..."
 # git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl

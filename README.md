@@ -1,6 +1,3 @@
-> [!WARNING]  
-> This package is under active development at the moment and may change its API and supported end systems at any time. End-users are advised to wait until a corresponding release with broader availability is made. Package developers are suggested to try out Reactant for integration, but should be advised of the same risks.
-
 
 # 🚀 SymbolicRegressionGPU.jl 
 

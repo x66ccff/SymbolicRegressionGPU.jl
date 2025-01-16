@@ -25,7 +25,7 @@ git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
 ```bash
 wget https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip
 unzip libtorch*.zip
-mv libtorch SymbolicRegressionGPU.jl/THArrays.jl/csrc
+cp libtorch SymbolicRegressionGPU.jl/THArrays.jl/csrc -r
 ```
 ### 🔧 3. install THArrays 
 see https://github.com/compintell/THArrays.jl/ for more details

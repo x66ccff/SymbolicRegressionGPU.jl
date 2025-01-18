@@ -23,7 +23,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: What version of SymbolicRegression.jl are you running? `julia -e 'import SymbolicRegression; println(SymbolicRegression.PACKAGE_VERSION)'`.
+      description: What version of SymbolicRegressionGPU.jl are you running? `julia -e 'import SymbolicRegression; println(SymbolicRegression.PACKAGE_VERSION)'`.
     validations:
       required: true
   - type: dropdown

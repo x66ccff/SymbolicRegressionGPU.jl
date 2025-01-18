@@ -26,7 +26,7 @@ end
 """
     symbolic_to_node(eqn::Symbolic, options::Options; kws...)
 
-Convert a SymbolicUtils.jl expression to SymbolicRegression.jl's `Node` type.
+Convert a SymbolicUtils.jl expression to SymbolicRegressionGPU.jl's `Node` type.
 """
 function symbolic_to_node(eqn::Symbolic, options::Options; kws...)
     return symbolic_to_node(eqn, options.operators; kws...)

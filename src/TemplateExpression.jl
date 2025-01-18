@@ -165,7 +165,7 @@ st_expr = TemplateExpression(
 )
 ```
 
-When fitting a model in SymbolicRegression.jl, you would provide the `TemplateExpression`
+When fitting a model in SymbolicRegressionGPU.jl, you would provide the `TemplateExpression`
 as the `expression_type` argument, and then pass `expression_options=(; structure=TemplateStructure(...))`
 as additional options. The `variable_constraints` will constraint `f` to only have access to `x1` and `x2`,
 and `g` to only have access to `x3`.

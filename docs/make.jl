@@ -31,17 +31,17 @@ readme = replace(readme, r"<!--.*?-->" => s"")
 # Then, we remove any line with "<div" on it:
 readme = replace(readme, r"<[/]?div.*" => s"")
 
-# We delete the https://github.com/MilesCranmer/SymbolicRegression.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0,
+# We delete the https://github.com/MilesCranmer/SymbolicRegressionGPU.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0,
 # and replace it with a video:
 readme = replace(
     readme,
-    r"https://github.com/MilesCranmer/SymbolicRegression.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0" =>
+    r"https://github.com/MilesCranmer/SymbolicRegressionGPU.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0" =>
         (
             """
             ```@raw html
             <div align="center">
             <video width="800" height="600" controls>
-            <source src="https://github.com/MilesCranmer/SymbolicRegression.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0" type="video/mp4">
+            <source src="https://github.com/MilesCranmer/SymbolicRegressionGPU.jl/assets/7593028/f5b68f1f-9830-497f-a197-6ae332c94ee0" type="video/mp4">
             </video>
             </div>
             ```
@@ -92,7 +92,7 @@ DocMeta.setdocmeta!(
     recursive=true,
 )
 makedocs(;
-    sitename="SymbolicRegression.jl",
+    sitename="SymbolicRegressionGPU.jl",
     authors="Miles Cranmer",
     doctest=true,
     strict=:doctest,
@@ -147,7 +147,7 @@ end
 
 if !haskey(ENV, "JL_LIVERELOAD")
     ENV["DOCUMENTER_KEY"] = get(ENV, "DOCUMENTER_KEY_ASTROAUTOMATA", "")
-    deploydocs(; repo="github.com/MilesCranmer/SymbolicRegression.jl.git")
+    deploydocs(; repo="github.com/MilesCranmer/SymbolicRegressionGPU.jl.git")
 
     ENV["DOCUMENTER_KEY"] = get(ENV, "DOCUMENTER_KEY_CAM", "")
     ENV["GITHUB_REPOSITORY"] = "ai-damtp-cam-ac-uk/symbolicregression.git"

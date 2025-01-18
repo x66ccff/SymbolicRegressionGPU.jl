@@ -29,12 +29,12 @@ jobs:
       - name: Run benchmarks
         run: |
           mkdir results
-          benchpkg SymbolicRegression --rev="MilesCranmer/SymbolicRegression.jl#master,${{github.event.pull_request.head.sha}}" --url=${{ github.event.repository.clone_url }} --bench-on="${{github.event.pull_request.head.sha}}" --output-dir=results/ --exeflags="-O3 --threads=auto"
+          benchpkg SymbolicRegression --rev="MilesCranmer/SymbolicRegressionGPU.jl#master,${{github.event.pull_request.head.sha}}" --url=${{ github.event.repository.clone_url }} --bench-on="${{github.event.pull_request.head.sha}}" --output-dir=results/ --exeflags="-O3 --threads=auto"
       
       - name: Generate comparison table
         run: |
-          benchpkgtable SymbolicRegression --rev="MilesCranmer/SymbolicRegression.jl#master,${{github.event.pull_request.head.sha}}" --input-dir=results/ --ratio > table.md
-          echo '### Performance Comparison vs MilesCranmer/SymbolicRegression.jl' > body.md
+          benchpkgtable SymbolicRegression --rev="MilesCranmer/SymbolicRegressionGPU.jl#master,${{github.event.pull_request.head.sha}}" --input-dir=results/ --ratio > table.md
+          echo '### Performance Comparison vs MilesCranmer/SymbolicRegressionGPU.jl' > body.md
           echo '' >> body.md
           cat table.md >> body.md
       

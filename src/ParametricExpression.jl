@@ -1,6 +1,6 @@
 """
 Note that ParametricExpression is defined within DynamicExpressions.jl,
-this file just adds custom behavior for SymbolicRegression.jl, where needed.
+this file just adds custom behavior for SymbolicRegressionGPU.jl, where needed.
 """
 module ParametricExpressionModule
 

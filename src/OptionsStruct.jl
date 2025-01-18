@@ -127,7 +127,7 @@ operator_specialization(
 """
     AbstractOptions
 
-An abstract type that stores all search hyperparameters for SymbolicRegression.jl.
+An abstract type that stores all search hyperparameters for SymbolicRegressionGPU.jl.
 The standard implementation is [`Options`](@ref).
 
 You may wish to create a new subtypes of `AbstractOptions` to override certain functions
@@ -173,7 +173,7 @@ Base.propertynames(options::MyOptions) = (NEW_OPTIONS_KEYS..., fieldnames(Symbol
 ```
 
 which would let you access `a` and `b` from `MyOptions` objects, as well as making
-all properties of `Options` available for internal methods in SymbolicRegression.jl
+all properties of `Options` available for internal methods in SymbolicRegressionGPU.jl
 """
 abstract type AbstractOptions end
 

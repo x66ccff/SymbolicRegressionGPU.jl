@@ -1,6 +1,6 @@
 """
 This module provides functions for creating, initializing, and manipulating
-`<:AbstractExpression` instances and their metadata within the SymbolicRegression.jl framework.
+`<:AbstractExpression` instances and their metadata within the SymbolicRegressionGPU.jl framework.
 """
 module ExpressionBuilderModule
 

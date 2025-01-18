@@ -67,7 +67,7 @@ function test_option_configuration(
         any(is_anonymous_function, options.operators.unaops)
         throw(
             AssertionError(
-                "Anonymous functions can't be used as operators for SymbolicRegression.jl"
+                "Anonymous functions can't be used as operators for SymbolicRegressionGPU.jl"
             ),
         )
     end

@@ -4,7 +4,7 @@
 
 _Note: Parametric expressions are currently considered experimental and may change in the future._
 
-Parameterized expressions in SymbolicRegression.jl allow you to discover symbolic expressions that contain
+Parameterized expressions in SymbolicRegressionGPU.jl allow you to discover symbolic expressions that contain
 optimizable parameters. This is particularly useful when you have data that follows different patterns
 based on some categorical variable, or when you want to learn an expression with constants that should
 be optimized during the search.

@@ -1,5 +1,4 @@
-module SymbolicRegression
-
+module SymbolicRegressionGPU
 # Types
 export Population,
     PopMember,

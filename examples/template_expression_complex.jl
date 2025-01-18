@@ -3,7 +3,7 @@
 #=
 # Searching with template expressions
 
-Template expressions are a powerful feature in SymbolicRegression.jl that allow you to impose structure
+Template expressions are a powerful feature in SymbolicRegressionGPU.jl that allow you to impose structure
 on the symbolic regression search. Rather than searching for a completely free-form expression, you can
 specify a template that combines multiple sub-expressions in a prescribed way.
 

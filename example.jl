@@ -1,7 +1,7 @@
 # export JULIA_NUM_THREADS=4
 # julia --project=. example.jl
 
-using SymbolicRegression
+using SymbolicRegressionGPU
 
 function main()
     X = randn(Float32, 5, 100)
@@ -11,7 +11,7 @@ function main()
     # y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
     y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
 
-    options = SymbolicRegression.Options(;
+    options = SymbolicRegressionGPU.Options(;
         binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin]
     )
 

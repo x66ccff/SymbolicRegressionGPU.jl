@@ -598,7 +598,7 @@ MMI.metadata_pkg(
     AbstractSRRegressor;
     name="SymbolicRegression",
     uuid="8254be44-1295-4e6a-a16d-46603ac705cb",
-    url="https://github.com/MilesCranmer/SymbolicRegression.jl",
+    url="https://github.com/MilesCranmer/SymbolicRegressionGPU.jl",
     julia=true,
     license="Apache-2.0",
     is_wrapper=false,

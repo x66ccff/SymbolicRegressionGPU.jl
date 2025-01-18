@@ -1,5 +1,5 @@
-name = "SymbolicRegression"
-uuid = "8254be44-1295-4e6a-a16d-46603ac705cb"
+name = "SymbolicRegressionGPU"
+uuid = "15561277-8ce4-40f2-9422-5d7a3ff74b8d"
 authors = ["MilesCranmer <miles.cranmer@gmail.com>"]
 version = "1.5.2"
 

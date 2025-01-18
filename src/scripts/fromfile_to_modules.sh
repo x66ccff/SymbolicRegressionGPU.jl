@@ -14,6 +14,6 @@ done
 
 # Changes to make:
 # - Run this file on everything.
-# - Change `import ..` to `import .` in SymbolicRegression.jl
+# - Change `import ..` to `import .` in SymbolicRegressionGPU.jl
 # - Rename module that have same name as existing variables:
     # - All files are mapped to _{file}.jl, and modules as well.

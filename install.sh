@@ -28,13 +28,21 @@ if [ -f "$LIBTORCH_ZIP" ]; then
     REDOWNLOAD=${REDOWNLOAD:-N}  # Default to N if no input
     if [[ "$REDOWNLOAD" =~ ^[Yy]$ ]]; then
         echo "Re-downloading libtorch..."
-        wget "$LIBTORCH_URL" -O "$LIBTORCH_ZIP"
+        wget_output=$(wget "$LIBTORCH_URL" -O "$LIBTORCH_ZIP" 2>&1)
+        if echo "$wget_output" | grep -q "ERROR"; then
+            echo "❌ Download failed. Please check your internet connection and try again."
+            exit 1
+        fi
     else
         echo "Skipping download."
     fi
 else
     echo "Downloading libtorch..."
-    wget "$LIBTORCH_URL"
+    wget_output=$(wget "$LIBTORCH_URL" 2>&1)
+    if echo "$wget_output" | grep -q "ERROR"; then
+        echo "❌ Download failed. Please check your internet connection and try again."
+        exit 1
+    fi
 fi
 
 # Check if the libtorch directory already exists

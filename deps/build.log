@@ -1,0 +1,59 @@
+/home/ruankai/opt/julia/bin/julia
+/home/ruankai/anaconda3/bin/cmake
+┌ Error: ❌ Download failed. Please manually download from: https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0+cu121.zip
+└ @ Main ~/THArrays-src-branch/SymbolicRegressionGPU.jl/deps/build.jl:34
+┌ Error: Build failed
+│   exception =
+│    RequestError: HTTP/2 403 while requesting https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0+cu121.zip
+│    Stacktrace:
+│      [1] #3
+│        @ ~/opt/julia/share/julia/stdlib/v1.11/Downloads/src/Downloads.jl:271 [inlined]
+│      [2] open(f::Downloads.var"#3#4"{Nothing, Vector{Pair{String, String}}, Float64, Nothing, Bool, Nothing, Nothing, String}, args::String; kwargs::@Kwargs{write::Bool, lock::Bool})
+│        @ Base ./io.jl:410
+│      [3] open_nolock
+│        @ ~/opt/julia/share/julia/stdlib/v1.11/ArgTools/src/ArgTools.jl:35 [inlined]
+│      [4] arg_write(f::Function, arg::String)
+│        @ ArgTools ~/opt/julia/share/julia/stdlib/v1.11/ArgTools/src/ArgTools.jl:103
+│      [5] #download#2
+│        @ ~/opt/julia/share/julia/stdlib/v1.11/Downloads/src/Downloads.jl:258 [inlined]
+│      [6] download
+│        @ ~/opt/julia/share/julia/stdlib/v1.11/Downloads/src/Downloads.jl:247 [inlined]
+│      [7] main()
+│        @ Main ~/THArrays-src-branch/SymbolicRegressionGPU.jl/deps/build.jl:32
+│      [8] top-level scope
+│        @ ~/THArrays-src-branch/SymbolicRegressionGPU.jl/deps/build.jl:61
+│      [9] include(fname::String)
+│        @ Main ./sysimg.jl:38
+│     [10] top-level scope
+│        @ none:5
+│     [11] eval
+│        @ ./boot.jl:430 [inlined]
+│     [12] exec_options(opts::Base.JLOptions)
+│        @ Base ./client.jl:296
+│     [13] _start()
+│        @ Base ./client.jl:531
+└ @ Main ~/THArrays-src-branch/SymbolicRegressionGPU.jl/deps/build.jl:63
+ERROR: LoadError: RequestError: HTTP/2 403 while requesting https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0+cu121.zip
+Stacktrace:
+  [1] #3
+    @ ~/opt/julia/share/julia/stdlib/v1.11/Downloads/src/Downloads.jl:271 [inlined]
+  [2] open(f::Downloads.var"#3#4"{Nothing, Vector{Pair{String, String}}, Float64, Nothing, Bool, Nothing, Nothing, String}, args::String; kwargs::@Kwargs{write::Bool, lock::Bool})
+    @ Base ./io.jl:410
+  [3] open_nolock
+    @ ~/opt/julia/share/julia/stdlib/v1.11/ArgTools/src/ArgTools.jl:35 [inlined]
+  [4] arg_write(f::Function, arg::String)
+    @ ArgTools ~/opt/julia/share/julia/stdlib/v1.11/ArgTools/src/ArgTools.jl:103
+  [5] #download#2
+    @ ~/opt/julia/share/julia/stdlib/v1.11/Downloads/src/Downloads.jl:258 [inlined]
+  [6] download
+    @ ~/opt/julia/share/julia/stdlib/v1.11/Downloads/src/Downloads.jl:247 [inlined]
+  [7] main()
+    @ Main ~/THArrays-src-branch/SymbolicRegressionGPU.jl/deps/build.jl:32
+  [8] top-level scope
+    @ ~/THArrays-src-branch/SymbolicRegressionGPU.jl/deps/build.jl:61
+  [9] include(fname::String)
+    @ Main ./sysimg.jl:38
+ [10] top-level scope
+    @ none:5
+in expression starting at /home/ruankai/THArrays-src-branch/SymbolicRegressionGPU.jl/deps/build.jl:60
+📦 Downloading libtorch...

@@ -20,7 +20,7 @@ function main()
     end
 
     # Libtorch setup
-    libtorch_zip = "libtorch-cxx11-abi-shared-with-deps-2.1.0+cu121.zip"
+    libtorch_zip = "libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip"
     libtorch_url = "https://download.pytorch.org/libtorch/cu121/$libtorch_zip"
     
     # Download libtorch if needed

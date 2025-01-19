@@ -28,7 +28,7 @@ if [ -f "$LIBTORCH_ZIP" ]; then
         if echo "$wget_output" | grep -q "ERROR"; then
             echo "❌ Download failed. Please manually download the file from the following URL:"
             echo "   $LIBTORCH_URL"
-            echo "After downloading, place the file in the current directory and re-run this script."
+            echo "After downloading, place the file in the SymbolicRegressionGPU.jl dir and re-run this script."
             exit 1
         fi
     else
@@ -40,7 +40,7 @@ else
     if echo "$wget_output" | grep -q "ERROR"; then
         echo "❌ Download failed. Please manually download the file from the following URL:"
         echo "   $LIBTORCH_URL"
-        echo "After downloading, place the file in the current directory and re-run this script."
+        echo "After downloading, place the file in the SymbolicRegressionGPU.jl dir and re-run this script."
         exit 1
     fi
 fi

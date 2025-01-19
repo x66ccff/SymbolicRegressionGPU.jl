@@ -12,10 +12,6 @@ if ! command -v cmake &> /dev/null; then
     exit 1
 fi
 
-# # Step 1: Clone the repository
-# echo "📥 Cloning the repository..."
-# git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
-
 # Step 2: Download and set up libtorch
 LIBTORCH_ZIP="libtorch-cxx11-abi-shared-with-deps-2.1.0+cu121.zip"
 LIBTORCH_URL="https://download.pytorch.org/libtorch/cu121/$LIBTORCH_ZIP"
@@ -30,7 +26,9 @@ if [ -f "$LIBTORCH_ZIP" ]; then
         echo "Re-downloading libtorch..."
         wget_output=$(wget "$LIBTORCH_URL" -O "$LIBTORCH_ZIP" 2>&1)
         if echo "$wget_output" | grep -q "ERROR"; then
-            echo "❌ Download failed. Please check your internet connection and try again."
+            echo "❌ Download failed. Please manually download the file from the following URL:"
+            echo "   $LIBTORCH_URL"
+            echo "After downloading, place the file in the current directory and re-run this script."
             exit 1
         fi
     else
@@ -40,7 +38,9 @@ else
     echo "Downloading libtorch..."
     wget_output=$(wget "$LIBTORCH_URL" 2>&1)
     if echo "$wget_output" | grep -q "ERROR"; then
-        echo "❌ Download failed. Please check your internet connection and try again."
+        echo "❌ Download failed. Please manually download the file from the following URL:"
+        echo "   $LIBTORCH_URL"
+        echo "After downloading, place the file in the current directory and re-run this script."
         exit 1
     fi
 fi

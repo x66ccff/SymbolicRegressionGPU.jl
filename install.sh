@@ -13,7 +13,7 @@ if ! command -v cmake &> /dev/null; then
 fi
 
 # Step 2: Download and set up libtorch
-LIBTORCH_ZIP="libtorch-cxx11-abi-shared-with-deps-2.1.0+cu121.zip"
+LIBTORCH_ZIP="libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip"
 LIBTORCH_URL="https://download.pytorch.org/libtorch/cu121/$LIBTORCH_ZIP"
 
 echo "📦 Downloading and setting up libtorch..."

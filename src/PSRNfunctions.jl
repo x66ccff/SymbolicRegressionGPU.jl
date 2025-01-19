@@ -1,7 +1,7 @@
 __precompile__(false)
 module PSRNfunctions
 
-using THArrays
+using .THArrays
 
 # Constants definition
 const libtorch_dtype_dict = Dict{Int,DataType}(

@@ -25,7 +25,7 @@ import ..CoreModule: Options, Dataset
 
 using Printf: @sprintf
 using DynamicExpressions: Node, Expression
-using THArrays
+using .THArrays
 
 # Operator abstractions
 abstract type Operator end

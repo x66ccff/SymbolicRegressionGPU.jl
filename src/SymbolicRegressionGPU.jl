@@ -165,7 +165,7 @@ using DynamicExpressions: with_type_parameters
     LogCoshLoss
 using DynamicDiff: D
 using Compat: @compat, Fix
-using THArrays
+using .THArrays
 
 #! format: off
 @compat(

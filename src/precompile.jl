@@ -1,5 +1,5 @@
 using PrecompileTools: @compile_workload, @setup_workload
-# using THArrays
+# using .THArrays
 macro maybe_setup_workload(mode, ex)
     precompile_ex = Expr(
         :macrocall, Symbol("@setup_workload"), LineNumberNode(@__LINE__), ex

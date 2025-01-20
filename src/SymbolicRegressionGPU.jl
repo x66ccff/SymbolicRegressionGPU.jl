@@ -227,6 +227,7 @@ using DispatchDoctor: @stable
     include("ParametricExpression.jl")
     include("PSRNfunctions.jl")
     include("PSRNmodel.jl")
+    include("PSRNmodel.jl")
 end
 
 using .CoreModule:

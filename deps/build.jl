@@ -4,6 +4,19 @@ using ZipFile
 using ProgressMeter
 using Tar
 using CodecZlib
+using Pkg
+
+function check_dependencies()
+    println("🔍 检查依赖...")
+    
+    # 检查CMake
+    try
+        run(`cmake --version`)
+        println("✅ CMake 已安装")
+    catch
+        error("❌ 未找到CMake。请安装CMake后重试。")
+    end
+end
 
 function download_with_retry(url, output_path; max_retries=3, timeout=600)
     for attempt in 1:max_retries
@@ -35,11 +48,9 @@ function download_with_retry(url, output_path; max_retries=3, timeout=600)
     return false
 end
 
-function create_artifact_tarball()
-    println("🚀 开始创建 artifact...")
+function setup_libtorch(temp_dir)
+    println("\n📦 设置 libtorch...")
     
-    # 创建临时目录
-    temp_dir = mktempdir()
     zip_path = joinpath(temp_dir, "libtorch.zip")
     artifact_dir = joinpath(temp_dir, "artifact")
     mkpath(artifact_dir)
@@ -55,7 +66,6 @@ function create_artifact_tarball()
     println("\n📦 正在解压文件...")
     rd = ZipFile.Reader(zip_path)
     
-    # 计算总文件数
     total_files = length(rd.files)
     p = Progress(total_files; desc="解压进度: ", showspeed=true)
     
@@ -72,55 +82,74 @@ function create_artifact_tarball()
     close(rd)
     println("✅ 解压完成!")
     
-    # 创建 tar.gz
-    println("\n📦 正在创建 tar.gz...")
-    tarball_path = joinpath(temp_dir, "libtorch.tar.gz")
-    open(tarball_path, "w") do io
-        gz = GzipCompressorStream(io)
-        Tar.create(artifact_dir, gz)
-        close(gz)
-    end
-    
-    # 计算 tree-sha1
-    println("\n🔍 正在计算 git-tree-sha1...")
-    tree_sha = bytes2hex(SHA.sha1(artifact_dir))
-    
-    # 计算 tarball sha256
-    println("🔍 正在计算 tarball sha256...")
-    tarball_sha256 = bytes2hex(open(sha256, tarball_path))
-    
-    println("\n✨ 计算完成!")
-    println("\n最终结果:")
-    println("git-tree-sha1 = \"$tree_sha\"")
-    println("tarball sha256 = \"$tarball_sha256\"")
-    
-    # 生成 Artifacts.toml
-    artifacts_toml = """
-    [libtorch]
-    git-tree-sha1 = "$tree_sha"
-    lazy = true
-    
-    [[libtorch.download]]
-    url = "https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip"
-    sha256 = "$tarball_sha256"
-    """
-    
-    # 保存 Artifacts.toml
-    artifacts_path = joinpath(@__DIR__, "Artifacts.toml")
-    write(artifacts_path, artifacts_toml)
-    println("\n✅ 已生成 Artifacts.toml")
-    
-    # 清理
-    println("\n🧹 清理临时文件...")
-    rm(temp_dir, recursive=true)
-    println("✅ 清理完成!")
-    
-    return (tree_sha, tarball_sha256)
+    return joinpath(artifact_dir, "libtorch")  # 返回解压后的libtorch目录路径
 end
 
-try
-    tree_sha, tarball_sha256 = create_artifact_tarball()
-catch e
-    @error "创建失败" exception=(e, catch_backtrace())
-    rethrow(e)
+
+function compile_tharray(libtorch_path)
+    println("\n🔧 编译 THArrays...")
+    
+    # 设置环境变量
+    ENV["THARRAYS_DEV"] = "1"
+    ENV["CUDAARCHS"] = "native"
+    
+    # 获取正确的目录路径
+    # 从deps/build.jl向上两级得到项目根目录
+    root_dir = dirname(dirname(@__FILE__))
+    
+    # THArrays在主包的src下
+    csrc_dir = joinpath(root_dir, "src", "THArrays", "csrc")
+    println("检查目录: $csrc_dir")
+    
+    if !isfile(joinpath(csrc_dir, "CMakeLists.txt"))
+        error("在 $csrc_dir 中未找到 CMakeLists.txt 文件")
+    end
+    
+    # 复制libtorch到csrc目录
+    println("复制 libtorch 到 $csrc_dir")
+    cp(libtorch_path, joinpath(csrc_dir, "libtorch"), force=true)
+    
+    # 创建build目录
+    build_dir = joinpath(csrc_dir, "build")
+    mkpath(build_dir)
+    
+    # 运行CMake
+    cd(build_dir) do
+        println("在目录 $(pwd()) 中运行 CMake")
+        println("源代码目录: $csrc_dir")
+        run(`cmake $csrc_dir`)
+        run(`cmake --build . --config Release`)
+    end
+    
+    println("✅ 编译完成!")
 end
+
+function main()
+    try
+        # 检查依赖
+        check_dependencies()
+        
+        # 创建临时目录
+        temp_dir = mktempdir()
+        
+        # 设置libtorch
+        libtorch_path = setup_libtorch(temp_dir)
+        
+        # 编译THArrays
+        compile_tharray(libtorch_path)
+        
+        # 清理
+        println("\n🧹 清理临时文件...")
+        rm(temp_dir, recursive=true)
+        println("✅ 清理完成!")
+        
+        println("\n🎉 构建成功完成!")
+        
+    catch e
+        @error "构建失败" exception=(e, catch_backtrace())
+        rethrow(e)
+    end
+end
+
+# 运行主函数
+main()

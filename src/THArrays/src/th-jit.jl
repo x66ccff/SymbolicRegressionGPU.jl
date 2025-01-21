@@ -16,9 +16,13 @@ mutable struct CompilationUnit
     end
 end
 
+const LIBTORCH_CAPI_PATH = joinpath(@__DIR__, "../", "csrc", "build", "libtorch_capi.so")
+
 function compile(code::AbstractString)
     fields = [Ptr{Nothing}(0), Ptr{Nothing}(0)]
-    cu = ccall((:cunit_compile, :libtorch_capi),
+    
+    println("LIBTORCH_CAPI_PATH ", LIBTORCH_CAPI_PATH)
+    cu = ccall((:cunit_compile, LIBTORCH_CAPI_PATH),
                Ptr{Cvoid}, (Ptr{Cvoid}, Cstring),
                fields, pointer(code))
     CompilationUnit(fields[1], fields[2])

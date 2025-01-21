@@ -25,6 +25,8 @@ import ..CoreModule: Options, Dataset
 
 using Printf: @sprintf
 using DynamicExpressions: Node, Expression
+
+include("THArrays/src/THArrays.jl")
 using .THArrays
 
 # Operator abstractions
@@ -396,7 +398,9 @@ end
 
 function get_best_expr_and_MSE_topk(
     model::PSRN,
-    X::THArrays.Tensor{Float32,2},
+    X::THArrays.Tensor{Float32,2}, #TODO 怎么好像变成 Pytorch.Tensor了？？是因为.so的设置不正确吗？改成Any之后就好了
+    # X::Tensor{Float32,2},
+    # X::Any,
     Y::Vector{Float32},
     n_top::Int,
     device_id::Int,

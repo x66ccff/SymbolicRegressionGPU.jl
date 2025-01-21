@@ -18,9 +18,21 @@ function abs_out(self::Tensor, other::Tensor)
 end
 """
 
-const PROJECT_DIR = (@__DIR__) |> dirname |> dirname
-const CPP_API_FILE = joinpath(PROJECT_DIR, "csrc", "torch_api_generated.cpp")
-const JUL_API_FILE = joinpath(PROJECT_DIR, "src", "thc", "thc.jl")
+# 计算 PROJECT_DIR
+const PROJECT_DIR = (@__DIR__) |> dirname |> dirname |> dirname
+
+# 定义 THARRAYS_DIR
+const THARRAYS_DIR = joinpath(PROJECT_DIR, "src", "THArrays")
+
+# 定义 CPP_API_FILE 和 JUL_API_FILE
+const CPP_API_FILE = joinpath(THARRAYS_DIR, "csrc", "torch_api_generated.cpp")
+const JUL_API_FILE = joinpath(THARRAYS_DIR, "thc.jl")
+
+# 打印路径以验证
+println("PROJECT_DIR: ", PROJECT_DIR)
+println("THARRAYS_DIR: ", THARRAYS_DIR)
+println("CPP_API_FILE: ", CPP_API_FILE)
+println("JUL_API_FILE: ", JUL_API_FILE)
 
 const FUNC_SIG_REG = r"(\w+)\s+(\*?atg_\w+)\((.+)\)\s*{"
 

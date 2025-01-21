@@ -1,5 +1,6 @@
 __precompile__(false)
 module PSRNfunctions
+include("THArrays/src/THArrays.jl")
 
 using .THArrays
 

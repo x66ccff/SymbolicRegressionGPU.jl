@@ -1,5 +1,5 @@
 [libtorch]
-git-tree-sha1 = "9aec2eb1358332131e5e78f6e5d913c25f0ad94a"
+git-tree-sha1 = "af9b4821be576d9286d3ad3f2da23a6867a3450f"
 lazy = true
 
 [[libtorch.download]]

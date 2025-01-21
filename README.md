@@ -3,6 +3,7 @@
 
 💻 [PSRN](https://github.com/intell-sci-comput/PTS) (Parallel Symbolic Regression Network) enhanced SymbolicRegression.jl via **faster**, large-scale parallel symbolic evaluations on GPUs. _Based on [SymbolicRegression.jl](https://github.com/MilesCranmer/SymbolicRegression.jl)_.  [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://ai.damtp.cam.ac.uk/symbolicregression/dev/)
 
+
 # Quickstart
 
 ### 📥 1. clone this repo 
@@ -11,18 +12,23 @@
 git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
 ```
 
-### 📦 2. Auto install [libtorch](https://pytorch.org/cppdocs/installing.html) and [THArrays.jl](https://github.com/compintell/THArrays.jl/)
+### 📦 2. Install 
 
 ```bash
-chmod +x install.sh
-./install.sh
+julia ]
+(@v1.1x) pkg> dev .
+(@v1.1x) pkg> build SymbolicRegressionGPU
 ```
+
+> [!NOTE]
+> If an error occurs at 100% progress of cmake, it can still be used (this issue will be fixed shortly).
+
 
 ### 🏃‍♂️ 3. Run 
 ```bash
 export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
 
-julia --project=. example.jl
+julia example.jl
 ```
 
 # 📚 Citing 

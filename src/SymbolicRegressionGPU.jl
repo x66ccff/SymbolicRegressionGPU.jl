@@ -224,9 +224,9 @@ using DispatchDoctor: @stable
     include("ComposableExpression.jl")
     include("TemplateExpression.jl")
     include("ParametricExpression.jl")
+    include("PSRNtharray.jl")
     include("PSRNfunctions.jl")
     include("PSRNmodel.jl")
-    include("THArrays/src/THArrays.jl")
 end
 
 using .CoreModule:
@@ -332,7 +332,8 @@ using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
 import .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk
 
-using .THArrays
+# using .THArrays
+using ..PSRNtharray
 
 @stable default_mode = "disable" begin
     include("deprecates.jl")

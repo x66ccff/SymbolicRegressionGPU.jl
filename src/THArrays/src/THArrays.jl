@@ -9,9 +9,13 @@ export TorchNumber, Tensor, Scalar, eltype_id,
 
 const PROJECT_DIR = (@__DIR__) |> dirname
 
+const LIBTORCH_CAPI_PATH = joinpath(@__DIR__, "../", "csrc", "build", "libtorch_capi.so")
+
+
 function __init__()
     push!(Libdl.DL_LOAD_PATH, joinpath(PROJECT_DIR, "deps/lib"))
-    Libdl.dlopen(joinpath(PROJECT_DIR, "deps/lib/libtorch_capi"))
+    # Libdl.dlopen(joinpath(PROJECT_DIR, "deps/lib/libtorch_capi"))
+    Libdl.dlopen(LIBTORCH_CAPI_PATH)
     @async handle_error_in_julia()
     @require Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c" @eval include("compat/tracker.jl")
 end

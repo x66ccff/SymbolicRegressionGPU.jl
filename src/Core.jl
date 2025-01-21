@@ -10,6 +10,8 @@ include("OptionsStruct.jl")
 include("Operators.jl")
 include("Options.jl")
 
+
+# using .THArrays
 using .ProgramConstantsModule: RecordType, DATA_TYPE, LOSS_TYPE
 using .DatasetModule: Dataset, is_weighted, has_units, max_features
 using .MutationWeightsModule: AbstractMutationWeights, MutationWeights, sample_mutation

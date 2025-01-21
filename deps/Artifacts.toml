@@ -1,0 +1,7 @@
+[libtorch]
+git-tree-sha1 = "af9b4821be576d9286d3ad3f2da23a6867a3450f"
+lazy = true
+
+[[libtorch.download]]
+url = "https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip"
+sha256 = "75a7ebe2685694f2e23175e419807dd9c1bb2cc168f844f24502078d2f3d0647"

@@ -42,10 +42,10 @@ StyledStrings = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Tar = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
 ZipFile = "a5390f91-8eb1-5f08-bee0-b1d1ffed6cea"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 
 [weakdeps]
 Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
-JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
 
 [extensions]

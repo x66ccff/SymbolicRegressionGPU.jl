@@ -7,14 +7,14 @@ using CodecZlib
 using Pkg
 
 function check_dependencies()
-    println("🔍 检查依赖...")
+    println("🔍 Checking dependencies...")
     
-    # 检查CMake
+    # Check CMake
     try
         run(`cmake --version`)
-        println("✅ CMake 已安装")
+        println("✅ CMake is installed")
     catch
-        error("❌ 未找到CMake。请安装CMake后重试。")
+        error("❌ CMake not found. Please install CMake and try again.")
     end
 end
 using ProgressMeter: Progress, BarGlyphs, update!, next!, finish!
@@ -45,14 +45,14 @@ function download_with_retry(url, output_path; max_retries=3, timeout=600)
             end
             
             finish!(p)
-            println("\n✅ 下载成功!")
+            println("\n✅ Download successful!")
             return true
         catch e
-            println("\n❌ 下载失败: $e")
+            println("\n❌ Download failed: $e")
             if attempt == max_retries
                 rethrow(e)
             else
-                println("等待 10 秒后重试...")
+                println("Waiting 10 seconds before retrying...")
                 sleep(10)
             end
         end
@@ -61,25 +61,25 @@ function download_with_retry(url, output_path; max_retries=3, timeout=600)
 end
 
 function setup_libtorch(temp_dir)
-    println("\n📦 设置 libtorch...")
+    println("\n📦 Setting up libtorch...")
     
     zip_path = joinpath(temp_dir, "libtorch.zip")
     artifact_dir = joinpath(temp_dir, "artifact")
     mkpath(artifact_dir)
     
-    # 下载文件
+    # Download file
     url = "https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu121.zip"
     
     if !download_with_retry(url, zip_path, timeout=600)
-        error("下载失败，请检查网络连接或使用代理")
+        error("Download failed. Please check your network connection or use a proxy")
     end
     
-    # 解压文件
-    println("\n📦 正在解压文件...")
+    # Extract files
+    println("\n📦 Extracting files...")
     rd = ZipFile.Reader(zip_path)
     
     total_files = length(rd.files)
-    p = Progress(total_files; desc="解压进度: ", showspeed=true)
+    p = Progress(total_files; desc="Extraction progress: ", showspeed=true)
     
     for f in rd.files
         fullpath = joinpath(artifact_dir, f.name)
@@ -92,76 +92,76 @@ function setup_libtorch(temp_dir)
         next!(p)
     end
     close(rd)
-    println("✅ 解压完成!")
+    println("✅ Extraction complete!")
     
-    return joinpath(artifact_dir, "libtorch")  # 返回解压后的libtorch目录路径
+    return joinpath(artifact_dir, "libtorch")  # Return the path to the extracted libtorch directory
 end
 
 
 function compile_tharray(libtorch_path)
-    println("\n🔧 编译 THArrays...")
+    println("\n🔧 Compiling THArrays...")
     
-    # 设置环境变量
+    # Set environment variables
     ENV["THARRAYS_DEV"] = "1"
     ENV["CUDAARCHS"] = "native"
     
-    # 获取正确的目录路径
-    # 从deps/build.jl向上两级得到项目根目录
+    # Get correct directory path
+    # Go up two levels from deps/build.jl to get project root directory
     root_dir = dirname(dirname(@__FILE__))
     
-    # THArrays在主包的src下
+    # THArrays is in src of main package
     csrc_dir = joinpath(root_dir, "src", "THArrays", "csrc")
-    println("检查目录: $csrc_dir")
+    println("Checking directory: $csrc_dir")
     
     if !isfile(joinpath(csrc_dir, "CMakeLists.txt"))
-        error("在 $csrc_dir 中未找到 CMakeLists.txt 文件")
+        error("CMakeLists.txt file not found in $csrc_dir")
     end
     
-    # 复制libtorch到csrc目录
-    println("复制 libtorch 到 $csrc_dir")
+    # Copy libtorch to csrc directory
+    println("Copying libtorch to $csrc_dir")
     cp(libtorch_path, joinpath(csrc_dir, "libtorch"), force=true)
     
-    # 创建build目录
+    # Create build directory
     build_dir = joinpath(csrc_dir, "build")
     mkpath(build_dir)
     
-    # 运行CMake
+    # Run CMake
     cd(build_dir) do
-        println("在目录 $(pwd()) 中运行 CMake")
-        println("源代码目录: $csrc_dir")
+        println("Running CMake in directory $(pwd())")
+        println("Source code directory: $csrc_dir")
         run(`cmake $csrc_dir`)
         run(`cmake --build . --config Release`)
     end
     
-    println("✅ 编译完成!")
+    println("✅ Compilation complete!")
 end
 
 function main()
     try
-        # 检查依赖
+        # Check dependencies
         check_dependencies()
         
-        # 创建临时目录
+        # Create temporary directory
         temp_dir = mktempdir()
         
-        # 设置libtorch
+        # Set up libtorch
         libtorch_path = setup_libtorch(temp_dir)
         
-        # 编译THArrays
+        # Compile THArrays
         compile_tharray(libtorch_path)
         
-        # 清理
-        println("\n🧹 清理临时文件...")
+        # Clean up
+        println("\n🧹 Cleaning up temporary files...")
         rm(temp_dir, recursive=true)
-        println("✅ 清理完成!")
+        println("✅ Cleanup complete!")
         
-        println("\n🎉 构建成功完成!")
+        println("\n🎉 Build completed successfully!")
         
     catch e
-        @error "构建失败" exception=(e, catch_backtrace())
+        @error "Build failed" exception=(e, catch_backtrace())
         rethrow(e)
     end
 end
 
-# 运行主函数
+# Run main function
 main()

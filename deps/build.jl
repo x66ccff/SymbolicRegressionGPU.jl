@@ -17,6 +17,7 @@ function check_dependencies()
         error("❌ 未找到CMake。请安装CMake后重试。")
     end
 end
+using ProgressMeter: Progress, BarGlyphs, update!, next!, finish!
 
 function download_with_retry(url, output_path; max_retries=3, timeout=600)
     for attempt in 1:max_retries
@@ -33,9 +34,9 @@ function download_with_retry(url, output_path; max_retries=3, timeout=600)
                     progress = (total, now) -> begin
                         if total_size[] == 0 && total > 0
                             total_size[] = total
-                            p.n = total  # 更新进度条的总大小
+                            p.n = total
                         end
-                        if total > 0  # 防止除以0
+                        if total > 0
                             update!(p, now)
                         end
                     end,

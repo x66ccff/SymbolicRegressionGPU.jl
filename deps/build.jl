@@ -23,36 +23,27 @@ function download_with_retry(url, output_path; max_retries=3, timeout=600)
         try
             println("\n📥 Downloading libtorch $attempt/$max_retries...")
             
-            # Create a progress bar without starting it
-            prog = Progress(100; 
-                dt=0.1, 
-                barglyphs=BarGlyphs("[=> ]"), 
-                barlen=50, 
-                color=:cyan,
-                showspeed=true
-            )
+            p = Progress(1; dt=0.1, barglyphs=BarGlyphs("[=> ]"), barlen=50, color=:cyan)
             
-            let last_percentage = 0
+            let total_size = Ref{Int}(0)
                 Downloads.download(
                     url,
                     output_path;
                     timeout=timeout,
                     progress = (total, now) -> begin
-                        percentage = round(Int, now/total * 100)
-                        if percentage > last_percentage
-                            # Update progress bar
-                            update!(prog, percentage; showvalues = [
-                                (:Size, "$(total) bytes"),
-                                (:Downloaded, "$(now) bytes")
-                            ])
-                            last_percentage = percentage
+                        if total_size[] == 0 && total > 0
+                            total_size[] = total
+                            p.n = total  # 更新进度条的总大小
+                        end
+                        if total > 0  # 防止除以0
+                            update!(p, now)
                         end
                     end,
                     headers=["User-Agent" => "Julia/1.11"]
                 )
             end
             
-            finish!(prog)
+            finish!(p)
             println("\n✅ 下载成功!")
             return true
         catch e

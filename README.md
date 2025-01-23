@@ -17,7 +17,7 @@ git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
 ```bash
 julia ]
 (@v1.1x) pkg> dev .
-(@v1.1x) pkg> build SymbolicRegressionGPU
+(@v1.1x) pkg> build -v SymbolicRegressionGPU
 ```
 
 > [!NOTE]

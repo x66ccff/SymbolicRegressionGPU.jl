@@ -1,6 +1,9 @@
 name = "SymbolicRegressionGPU"
 uuid = "15561277-8ce4-40f2-9422-5d7a3ff74b8d"
-authors = ["MilesCranmer <miles.cranmer@gmail.com>"]
+authors = [
+    "Kai Ruan <kairuan@ruc.edu.cn>",
+    "MilesCranmer <miles.cranmer@gmail.com>"
+]
 version = "1.5.2"
 
 [deps]
@@ -67,7 +70,7 @@ DynamicQuantities = "1"
 Enzyme = "0.12, 0.13"
 JSON3 = "1"
 KernelAbstractions = "0.9.30"
-Libdl = "1.11.0"
+Libdl = "1.10.0"
 LineSearches = "7"
 Logging = "1"
 LossFunctions = "0.10, 0.11, 1"

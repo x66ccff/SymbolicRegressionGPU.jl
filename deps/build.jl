@@ -21,7 +21,7 @@ end
 function download_with_retry(url, output_path; max_retries=3, timeout=600)
     for attempt in 1:max_retries
         try
-            println("\n📥 下载尝试 $attempt/$max_retries...")
+            println("\n📥 Downloading libtorch $attempt/$max_retries...")
             
             Downloads.download(
                 url, 
@@ -29,7 +29,10 @@ function download_with_retry(url, output_path; max_retries=3, timeout=600)
                 timeout=timeout,
                 progress = (total, now) -> begin
                     percentage = round(now/total * 100, digits=1)
-                    print("\r下载进度: $percentage% ($(now)/$(total) bytes)")
+                    if !@isdefined(last_percentage) || percentage - last_percentage >= 1
+                        print("\rDownload progress: $percentage% ($(now)/$(total) bytes)")
+                        last_percentage = percentage
+                    end
                 end,
                 headers=["User-Agent" => "Julia/1.11"]
             )

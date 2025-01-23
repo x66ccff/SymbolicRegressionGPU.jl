@@ -26,3 +26,4 @@ LocalPreferences.toml
 git_contributions.py
 to_fit.csv
 example_CR.jl
+deps/build.log

@@ -1,5 +1,6 @@
 # export JULIA_NUM_THREADS=4
 # julia --project=. example.jl
+# julia example.jl
 
 using SymbolicRegressionGPU
 

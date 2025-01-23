@@ -31,7 +31,9 @@ function download_with_retry(url, output_path; max_retries=3, timeout=600)
                     progress = (total, now) -> begin
                         percentage = round(now/total * 100, digits=1)
                         if percentage - last_percentage >= 1
-                            print("\rDownload progress: $percentage% ($(now)/$(total) bytes)")
+                            # 使用println并强制刷新
+                            println(stderr, "\rDownload progress: $percentage% ($(now)/$(total) bytes)")
+                            flush(stderr)
                             last_percentage = percentage
                         end
                     end,

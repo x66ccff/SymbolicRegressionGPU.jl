@@ -42,7 +42,7 @@ To cite this fork SymbolicRegressionGPU.jl, please use the following BibTeX entr
     Cranmer, Miles AND
     Sun, Hao
   },
-  title = {SymbolicRegressionGPU.jl: PSRN enhanced SymbolicRegression.jl for fast, large-scale parallel symbolic evaluations on GPUs}, 
+  title = {SymbolicRegressionGPU.jl: PSRN enhanced SymbolicRegression.jl via fast, large-scale parallel symbolic evaluations on GPUs}, 
   year = {2024},
   url = {https://github.com/x66ccff/SymbolicRegressionGPU.jl}
 }

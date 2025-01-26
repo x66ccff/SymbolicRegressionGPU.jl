@@ -53,6 +53,10 @@ const OPERATORS = Dict{String,Operator}(
     "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
     "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
     "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
+
+    "Sqrt" => UnaryOperator("Sqrt", sqrt_kernel!, true, safe_sqrt),
+
+
     # "Add" => BinaryOperator("Add", add_kernel!, false, +),
     # "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
     "Add" => BinaryOperator("Add", add_kernel!, true, +),

@@ -13,7 +13,7 @@ function main()
     y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
 
     options = SymbolicRegressionGPU.Options(;
-        binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin]
+        binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin, sqrt]
     )
 
     hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)

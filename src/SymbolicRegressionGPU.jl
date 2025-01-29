@@ -1147,7 +1147,7 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 3
-        N_PSRN_INPUT = 20 # TODO this can be tuned
+        N_PSRN_INPUT = 15 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators

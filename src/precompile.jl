@@ -112,7 +112,7 @@ function do_precompilation(::Val{mode}) where {mode}
             X = randn(T, 3, N)
             y = start ? randn(T, N) : randn(T, nout, N)
             @maybe_compile_workload mode begin
-                options = SymbolicRegression.Options(;
+                options = SymbolicRegressionGPU.Options(;
                     binary_operators=[+, *, /, -, ^],
                     unary_operators=[sin, cos, exp, log, sqrt, abs],
                     populations=3,
@@ -164,7 +164,7 @@ function do_precompilation(::Val{mode}) where {mode}
     # precompile(PSRN, (Int, Vector{String}, Int, Any, Vector{Expression}, Options))
     # precompile(get_best_expressions, (PSRN, AbstractArray, AbstractArray, Any, Options, Int))
 
-    _precompile_psrn_evaluation()
+    # _precompile_psrn_evaluation()
     # _precompile_psrn_evaluation2()
 
     return nothing

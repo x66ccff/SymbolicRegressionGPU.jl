@@ -26,10 +26,12 @@ import ..CoreModule: Options, Dataset
 using Printf: @sprintf
 using DynamicExpressions: Node, Expression
 
-
 using ..PSRNtharray
 
-# Operator abstractions
+# 使用全局变量
+global TensorType = Any
+
+# 首先定义基础类型
 abstract type Operator end
 
 struct UnaryOperator <: Operator
@@ -46,19 +48,14 @@ struct BinaryOperator <: Operator
     expr_gen::Function
 end
 
-# Operator dictionary
+# 然后定义操作字典
 const OPERATORS = Dict{String,Operator}(
     "Identity" => UnaryOperator("Identity", identity_kernel!, true, identity),
     "Sin" => UnaryOperator("Sin", sin_kernel!, true, sin),
     "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
     "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
     "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
-
     "Sqrt" => UnaryOperator("Sqrt", sqrt_kernel!, true, safe_sqrt),
-
-
-    # "Add" => BinaryOperator("Add", add_kernel!, false, +),
-    # "Mul" => BinaryOperator("Mul", mul_kernel!, false, *),
     "Add" => BinaryOperator("Add", add_kernel!, true, +),
     "Mul" => BinaryOperator("Mul", mul_kernel!, true, *),
     "Div" => BinaryOperator("Div", div_kernel!, true, /),
@@ -67,10 +64,21 @@ const OPERATORS = Dict{String,Operator}(
     "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> 0 - x),
 )
 
-# generate torchscript code for concatenating tensors
+# Script management
+mutable struct CompilationManager
+    cat_units::Dict{Int,Any}
+    topk_units::Dict{Int,Any}
+    initialized::Bool
+    
+    CompilationManager() = new(Dict{Int,Any}(), Dict{Int,Any}(), false)
+end
+
+const COMPILATION_MANAGER = CompilationManager()
+
+# Script generation functions
 function generate_cat_script(n::Int)
     args = join(('a':'z')[1:n], ", ")
-    tensors = "(" * join(('a':'z')[1:n], ", ") * ")"
+    tensors = "(" * join(('a':'z')[1:n], ", ")  * ")"
     return """
     def main($args):
         result = torch.cat($tensors, dim=1)
@@ -78,64 +86,71 @@ function generate_cat_script(n::Int)
     """
 end
 
-const COMPILATION_UNITS = Dict{Int,Any}()
-for n in 2:26
-    COMPILATION_UNITS[n] = THJIT.compile(generate_cat_script(n))
+function get_cat_unit(n::Int)
+    if !haskey(COMPILATION_MANAGER.cat_units, n)
+        script = generate_cat_script(n)
+        COMPILATION_MANAGER.cat_units[n] = PSRNtharray.THArrays_mod[].THJIT.compile(script)
+    end
+    return COMPILATION_MANAGER.cat_units[n]
 end
 
-function concat_tensors(tensors::Vector{<:Tensor})
+function concat_tensors(tensors::Vector{T}) where T
     n = length(tensors)
-    if n < 2
-        error("Need at least 2 tensors to concatenate")
+    if n == 0
+        error("Cannot concatenate empty tensor list")
+    elseif n == 1
+        return tensors[1]
     elseif n > 26
         error("Maximum 26 tensors supported")
     end
 
-    cu = COMPILATION_UNITS[n]
-    return cu.main(tensors...)
+    unit = get_cat_unit(n)
+    return unit.main(tensors...)
 end
+
+# 在 concat_tensors 函数之后添加以下代码
 
 function generate_topk_script(k::Int)
     return """
-    def main(x):
-        result = torch.topk(x, k=$(k), dim=1, largest=False, sorted=True)[1].squeeze()
-        return result
+    def main(tensor):
+        _, indices = torch.topk(-tensor, k=$k, dim=1)  # 使用负号来获取最小值
+        return indices
     """
 end
 
-const TOPK_SCRIPTS = Dict{Int,Any}(
-    k => THJIT.compile(generate_topk_script(k)) for k in [5, 10, 20, 50, 100]
-)
-
-function topk_indices(tensor::Tensor, k::Int)
-    if !haskey(TOPK_SCRIPTS, k)
-        TOPK_SCRIPTS[k] = THJIT.compile(generate_topk_script(k))
+function get_topk_unit(k::Int)
+    if !haskey(COMPILATION_MANAGER.topk_units, k)
+        script = generate_topk_script(k)
+        COMPILATION_MANAGER.topk_units[k] = PSRNtharray.THArrays_mod[].THJIT.compile(script)
     end
-    return TOPK_SCRIPTS[k].main(tensor)
+    return COMPILATION_MANAGER.topk_units[k]
 end
 
-# DRLayer implementation
+function topk_indices(tensor::T, k::Int) where T
+    unit = get_topk_unit(k)
+    return unit.main(tensor)
+end
+
+# 之后定义其他结构和函数
 mutable struct DRLayer
     in_dim::Int
     out_dim::Int
-    dr_indices::Tensor
-    dr_mask::Tensor
+    dr_indices::TensorType
+    dr_mask::TensorType
     device::Int
 
     function DRLayer(in_dim::Int, dr_mask::Vector{Bool}, device::Int)
         out_dim = sum(dr_mask)
         arange_tensor = collect(0:(length(dr_mask) - 1))
-        # convert to Tensor 
-        dr_indices = Tensor(arange_tensor[dr_mask])
-        dr_mask_tensor = Tensor(dr_mask)
-        # move to device
+        dr_indices = PSRNtharray.THArrays_mod[].Tensor(arange_tensor[dr_mask])
+        dr_mask_tensor = PSRNtharray.THArrays_mod[].Tensor(dr_mask)
         dr_indices = to(dr_indices, CUDA(device))
         dr_mask_tensor = to(dr_mask_tensor, CUDA(device))
         return new(in_dim, out_dim, dr_indices, dr_mask_tensor, device)
     end
 end
 
-function forward(layer::DRLayer, x::Tensor)
+function forward(layer::DRLayer, x::TensorType)
     return x[:, layer.dr_mask]
 end
 
@@ -288,8 +303,8 @@ function get_offset_tensor(layer::SymbolLayer)
         offset_tensor[start:(start + len - 1), :] = t
         start += len
     end
-    # convert to Tensor
-    # offset_tensor = Tensor(offset_tensor)
+    # convert to TensorType
+    # offset_tensor = TensorType(offset_tensor)
     # move to device
     # offset_tensor = to(offset_tensor, CUDA(layer.device))
     return offset_tensor
@@ -312,8 +327,8 @@ function get_op_and_offset(layer::SymbolLayer, index::Int)
     return layer.operator_list[op_idx], offset
 end
 
-function forward(layer::SymbolLayer, x::Tensor)
-    results = Tensor[]
+function forward(layer::SymbolLayer, x::TensorType)
+    results = TensorType[]
     for op in layer.operator_list
         result = op.kernel(x)
         push!(results, result)
@@ -371,7 +386,7 @@ mutable struct PSRN
     end
 end
 
-function PSRN_forward(model::PSRN, x::Tensor)
+function PSRN_forward(model::PSRN, x::TensorType)
     h = x
     # print the device of h
     # @info "h device: $(on(x).index)"
@@ -381,7 +396,7 @@ function PSRN_forward(model::PSRN, x::Tensor)
     return h
 end
 
-# function find_best_indices(outputs::Tensor, y::Tensor; top_k::Int=100)
+# function find_best_indices(outputs::TensorType, y::TensorType; top_k::Int=100)
 #     n_samples = size(outputs, 1)
 #     n_expressions = size(outputs, 2)
 
@@ -402,9 +417,9 @@ end
 
 function get_best_expr_and_MSE_topk(
     model::PSRN,
-    X::Tensor{Float32,2}, #TODO 怎么好像变成 Pytorch.Tensor了？？是因为.so的设置不正确吗？改成Any之后就好了
-    # X::Tensor{Float32,2},
-    # X::Any,
+    # X::TensorType{Float32,2}, #TODO 怎么好像变成 Pytorch.Tensor了？？是因为.so的设置不正确吗？改成Any之后就好了
+    # X::TensorType{Float32,2},
+    X::Any,
     Y::Vector{Float32},
     n_top::Int,
     device_id::Int,
@@ -412,9 +427,9 @@ function get_best_expr_and_MSE_topk(
     # Calculate MSE for all expressions
     batch_size = size(X, 1)
     Y = Float32.(Y) # for saving memory
-    # sum_squared_errors = Tensor(zeros((1, model.out_dim)))
+    # sum_squared_errors = TensorType(zeros((1, model.out_dim)))
 
-    @time sum_squared_errors = Tensor(zeros(Float32, (1, model.out_dim))) # for saving memory
+    @time sum_squared_errors = TensorType(zeros(Float32, (1, model.out_dim))) # for saving memory
 
     @time sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
 
@@ -518,6 +533,12 @@ function Base.show(io::IO, model::PSRN)
     return print(io, join([layer.out_dim for layer in model.layers], " → "))
 end
 
+function __init__()
+    COMPILATION_MANAGER.initialized = false
+    # 更新类型别名
+    @eval TensorType = PSRNtharray.THArrays_mod[].Tensor
+end
+
 # Export types and functions
 export PSRN,
     SymbolLayer,
@@ -528,5 +549,6 @@ export PSRN,
     get_best_expr_and_MSE_topk,
     get_expr,
     get_op_and_offset
+
 
 end

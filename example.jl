@@ -40,6 +40,13 @@ function main()
             log => 1,
             sqrt => 1
         ],
+        cos => [
+            sin => 0,
+            cos => 0,
+            exp => 1,
+            log => 1,
+            sqrt => 1
+        ],
         exp => [
             exp => 0,
             log => 0

@@ -13,7 +13,45 @@ function main()
     y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
 
     options = SymbolicRegressionGPU.Options(;
-        binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin, sqrt]
+    binary_operators=[+, *, /, -],
+    unary_operators=[sin, cos, exp, log, sqrt],
+    # population_size=100,
+    # populations=15,
+    batching=true,
+    batch_size=100,
+    # adaptive_parsimony_scaling=1_000.0,
+    # parsimony=0.0,
+    # maxsize=30,
+    # maxdepth=20,
+    # turbo=true,
+    early_stop_condition=(l, c) -> l < 1e-6 && c == 5,
+    constraints = [
+        sin => 9,
+        cos => 9,
+        exp => 9,
+        log => 9,
+        sqrt => 9
+    ],
+    nested_constraints = [
+        sin => [
+            sin => 0,
+            cos => 0,
+            exp => 1,
+            log => 1,
+            sqrt => 1
+        ],
+        exp => [
+            exp => 0,
+            log => 0
+        ],
+        log => [
+            exp => 0,
+            log => 0
+        ],
+        sqrt => [
+            sqrt => 0
+        ]
+    ]
     )
 
     hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)

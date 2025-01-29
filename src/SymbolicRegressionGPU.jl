@@ -91,7 +91,7 @@ using Distributed
 using Printf: @printf, @sprintf
 using Pkg: Pkg
 using TOML: parsefile
-using Random: seed!, shuffle!, randperm
+using Random: seed!, shuffle!, shuffle, randperm
 using Reexport
 using ProgressMeter: finish!
 using DynamicExpressions:
@@ -833,31 +833,60 @@ mutable struct PSRNManager
 end
 
 function select_top_subtrees(
-    common_subtrees::Dict{Node,Int}, n::Int, options::AbstractOptions
+    common_subtrees::Dict{Node,Int}, 
+    n::Int, 
+    options::AbstractOptions, 
+    n_variables::Int;
+    ratio_subtrees::Float64=0.7,
+    ratio_variables::Float64=0.2
 )
+    # 确保比例之和不超过1
+    @assert ratio_subtrees + ratio_variables <= 1.0 "Ratios sum must be <= 1.0"
+    
+    # 过滤复杂度过高的子树
     filtered_subtrees = filter(
         pair -> begin
             node = pair.first
             complexity = compute_complexity(node, options)
-            return complexity <= 20 # TODO the 20 can be tuned
+            return complexity <= 10
         end, common_subtrees
     )
 
+    # 排序并添加随机扰动
     sorted_subtrees = sort(
-        collect(filtered_subtrees); by=x -> (x[2] * (1.0 + 0.5 * randn())), rev=true
-    ) # TODO the 0.3 can be tuned
+        collect(filtered_subtrees); 
+        by=x -> (x[2] * (1.0 + 0.5 * randn())), 
+        rev=true
+    )
 
     result = Node[]
-
-    for i in 1:min(n, length(sorted_subtrees))
+    
+    # 添加子树
+    n_subtrees = min(floor(Int, n * ratio_subtrees), length(sorted_subtrees))
+    for i in 1:n_subtrees
         push!(result, sorted_subtrees[i][1])
     end
 
-    while length(result) < n
-        current_num = (length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1 # TODO for the rest of the slots, we use 1, -1, 2, -2, 3, -3, ...
-        is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
-        val = is_positive ? Float32(current_num) : Float32(-current_num)
-        push!(result, Node(; val=val))
+    # 添加随机变量
+    if ratio_variables > 0
+        n_vars = floor(Int, n * ratio_variables)
+        candidates = shuffle(1:n_variables)
+        for i in candidates[1:min(n_vars, length(candidates))]
+            expr = Node(Float32; feature=i)
+            if !(expr in result)
+                push!(result, expr)
+            end
+        end
+    end
+
+    # 填充随机常数直到达到所需数量
+    remaining = n - length(result)
+    for num in 1:remaining
+        val = (num % 2 == 0) ? num : -num
+        if rand(Bool)
+            val = val * (1 + randn())
+        end
+        push!(result, Node(; val=Float32(val)))
     end
 
     return result
@@ -984,6 +1013,7 @@ function start_psrn_task(
     dataset::Dataset,
     options::AbstractOptions,
     N_PSRN_INPUT::Int,
+    n_variables::Int
 )
     if manager.current_task !== nothing && !istaskdone(manager.current_task)
         return nothing
@@ -996,9 +1026,13 @@ function start_psrn_task(
 
             common_subtrees = analyze_common_subtrees(dominating_trees)
 
-            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
+            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
 
             # @info "Selected subtrees:" top_subtrees
+            @info "✨Selected subtrees:"
+            for expr in top_subtrees
+                @info expr
+            end
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
@@ -1147,7 +1181,8 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 3
-        N_PSRN_INPUT = 15 # TODO this can be tuned
+        N_PSRN_INPUT = 20 # TODO this can be tuned
+        # N_PSRN_INPUT = 4 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
@@ -1231,6 +1266,9 @@ function _main_search_loop!(
             dataset = datasets[j]
             cur_maxsize = state.cur_maxsizes[j]
 
+            n_variables = size(dataset.X, 1)
+            n_samples = size(dataset.X, 2)
+
             for member in cur_pop.members
                 size = compute_complexity(member, options)
                 update_frequencies!(state.all_running_search_statistics[j]; size)
@@ -1246,7 +1284,7 @@ function _main_search_loop!(
 
             if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
                 start_psrn_task(
-                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT
+                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
                 )
                 process_psrn_results!(
                     psrn_manager, state.halls_of_fame[j], dataset, options

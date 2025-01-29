@@ -1,8 +1,10 @@
 # export JULIA_NUM_THREADS=4
+# export JULIA_DEBUG=loading
 # julia --project=. example.jl
 # julia example.jl
 
 using SymbolicRegressionGPU
+using LoopVectorization
 
 function main()
     X = randn(Float32, 5, 100)
@@ -17,13 +19,13 @@ function main()
     unary_operators=[sin, cos, exp, log, sqrt],
     # population_size=100,
     # populations=15,
-    batching=true,
-    batch_size=100,
+    # batching=true,
+    # batch_size=100,
     # adaptive_parsimony_scaling=1_000.0,
     # parsimony=0.0,
     # maxsize=30,
     # maxdepth=20,
-    # turbo=true,
+    turbo=true,
     early_stop_condition=(l, c) -> l < 1e-6 && c == 5,
     constraints = [
         sin => 9,

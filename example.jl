@@ -15,6 +15,7 @@ function main()
     y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
 
     options = SymbolicRegressionGPU.Options(;
+    timeout_in_seconds=600,
     binary_operators=[+, *, /, -],
     unary_operators=[sin, cos, exp, log, sqrt],
     population_size=100,
@@ -63,7 +64,7 @@ function main()
     ]
     )
 
-    hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)
+    hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading, niterations=30)
 
     dominating = calculate_pareto_frontier(hall_of_fame)
 

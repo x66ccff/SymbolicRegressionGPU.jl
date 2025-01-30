@@ -27,6 +27,7 @@ function main()
     maxsize=30,
     maxdepth=20,
     turbo=true,
+    complexity_of_constants=3,
     early_stop_condition=(l, c) -> l < 1e-6 && c == 5,
     constraints = [
         sin => 9,

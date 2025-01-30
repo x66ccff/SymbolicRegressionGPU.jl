@@ -375,13 +375,18 @@ function gen_random_tree(
     options::AbstractOptions,
     nfeatures::Int,
     ::Type{T},
-    rng::AbstractRNG=default_rng(),
+    rng::AbstractRNG=default_rng();
+    only_gen_bin_op::Union{Bool,Nothing}=nothing,
 ) where {T<:DATA_TYPE}
     # Note that this base tree is just a placeholder; it will be replaced.
     tree = constructorof(options.node_type)(T; val=convert(T, 1))
     for i in 1:length
         # TODO: This can be larger number of nodes than length.
-        tree = append_random_op(tree, options, nfeatures, rng)
+        if only_gen_bin_op == nothing
+            tree = append_random_op(tree, options, nfeatures, rng)
+        else 
+            tree = append_random_op(tree, options, nfeatures, rng; make_new_bin_op=only_gen_bin_op)
+        end
     end
     return tree
 end

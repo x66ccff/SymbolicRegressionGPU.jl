@@ -832,16 +832,15 @@ mutable struct PSRNManager
     end
 end
 
-function select_top_subtrees(
+function select_top_subtrees( # TODO KK
     common_subtrees::Dict{Node,Int}, 
     n::Int, 
     options::AbstractOptions, 
     n_variables::Int;
-    ratio_subtrees::Float64=0.7,
-    ratio_variables::Float64=0.2
+    ratio_subtrees::Float64=0.5
 )
     # 确保比例之和不超过1
-    @assert ratio_subtrees + ratio_variables <= 1.0 "Ratios sum must be <= 1.0"
+    @assert ratio_subtrees <= 1.0 "Ratios sum must be <= 1.0"
     
     # 过滤复杂度过高的子树
     filtered_subtrees = filter(
@@ -868,26 +867,29 @@ function select_top_subtrees(
     end
 
     # 添加随机变量
-    if ratio_variables > 0
-        n_vars = floor(Int, n * ratio_variables)
-        candidates = shuffle(1:n_variables)
-        for i in candidates[1:min(n_vars, length(candidates))]
-            expr = Node(Float32; feature=i)
-            if !(expr in result)
-                push!(result, expr)
-            end
+    # 填充随机的树 （gen_random_tree）直到达到所需数量
+    
+    while length(result) < n
+        random_tree_length = rand(3:10)
+        tree = gen_random_tree(random_tree_length, options, 
+                            n_variables, Float32; 
+                            only_gen_bin_op=true)
+        if !(tree in result)
+            push!(result, tree)
         end
     end
 
-    # 填充随机常数直到达到所需数量
-    remaining = n - length(result)
-    for num in 1:remaining
-        val = (num % 2 == 0) ? num : -num
-        if rand(Bool)
-            val = val * (1 + randn())
-        end
-        push!(result, Node(; val=Float32(val)))
-    end
+
+
+    # # 填充随机常数直到达到所需数量
+    # remaining = n - length(result)
+    # for num in 1:remaining
+    #     val = (num % 2 == 0) ? num : -num
+    #     if rand(Bool)
+    #         val = val * (1 + randn())
+    #     end
+    #     push!(result, Node(; val=Float32(val)))
+    # end
 
     return result
 end
@@ -940,6 +942,8 @@ function evaluate_subtrees(
             else
                 result[:, i] .= one(T)
                 @warn "eval_tree_array failed for subtree $i, using ones"
+                @warn "where the failed tree is:"
+                @warn "🔥 $(subtrees[i]) 🔥"
             end
         end
     end

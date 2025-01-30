@@ -150,10 +150,11 @@ function append_random_op(
     nfeatures::Int,
     rng::AbstractRNG=default_rng();
     make_new_bin_op::Union{Bool,Nothing}=nothing,
+    feature_prob::Float64=0.5,
 ) where {T<:DATA_TYPE}
     tree, context = get_contents_for_mutation(ex, rng)
     ex = with_contents_for_mutation(
-        ex, append_random_op(tree, options, nfeatures, rng; make_new_bin_op), context
+        ex, append_random_op(tree, options, nfeatures, rng; make_new_bin_op, feature_prob=feature_prob), context
     )
     return ex
 end
@@ -163,6 +164,7 @@ function append_random_op(
     nfeatures::Int,
     rng::AbstractRNG=default_rng();
     make_new_bin_op::Union{Bool,Nothing}=nothing,
+    feature_prob::Float64=0.5,
 ) where {T<:DATA_TYPE}
     node = rand(rng, NodeSampler(; tree, filter=t -> t.degree == 0))
 
@@ -173,13 +175,13 @@ function append_random_op(
     if _make_new_bin_op
         newnode = constructorof(typeof(tree))(;
             op=rand(rng, 1:(options.nbin)),
-            l=make_random_leaf(nfeatures, T, typeof(tree), rng, options),
-            r=make_random_leaf(nfeatures, T, typeof(tree), rng, options),
+            l=make_random_leaf(nfeatures, T, typeof(tree), rng, options; feature_prob=feature_prob),
+            r=make_random_leaf(nfeatures, T, typeof(tree), rng, options; feature_prob=feature_prob),
         )
     else
         newnode = constructorof(typeof(tree))(;
             op=rand(rng, 1:(options.nuna)),
-            l=make_random_leaf(nfeatures, T, typeof(tree), rng, options),
+            l=make_random_leaf(nfeatures, T, typeof(tree), rng, options; feature_prob=feature_prob),
         )
     end
 
@@ -265,9 +267,10 @@ function make_random_leaf(
     ::Type{T},
     ::Type{N},
     rng::AbstractRNG=default_rng(),
-    ::Union{AbstractOptions,Nothing}=nothing,
+    ::Union{AbstractOptions,Nothing}=nothing;
+    feature_prob::Float64=0.5
 ) where {T<:DATA_TYPE,N<:AbstractExpressionNode}
-    if rand(rng, Bool)
+    if rand(rng, Float64) > feature_prob
         return constructorof(N)(T; val=randn(rng, T))
     else
         return constructorof(N)(T; feature=rand(rng, 1:nfeatures))
@@ -377,16 +380,13 @@ function gen_random_tree(
     ::Type{T},
     rng::AbstractRNG=default_rng();
     only_gen_bin_op::Union{Bool,Nothing}=nothing,
+    feature_prob::Float64=0.5,
 ) where {T<:DATA_TYPE}
     # Note that this base tree is just a placeholder; it will be replaced.
     tree = constructorof(options.node_type)(T; val=convert(T, 1))
     for i in 1:length
         # TODO: This can be larger number of nodes than length.
-        if only_gen_bin_op == nothing
-            tree = append_random_op(tree, options, nfeatures, rng)
-        else 
-            tree = append_random_op(tree, options, nfeatures, rng; make_new_bin_op=only_gen_bin_op)
-        end
+        tree = append_random_op(tree, options, nfeatures, rng; make_new_bin_op=only_gen_bin_op, feature_prob=feature_prob)
     end
     return tree
 end

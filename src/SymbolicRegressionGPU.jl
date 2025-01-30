@@ -873,7 +873,8 @@ function select_top_subtrees( # TODO KK
         random_tree_length = rand(3:10)
         tree = gen_random_tree(random_tree_length, options, 
                             n_variables, Float32; 
-                            only_gen_bin_op=true)
+                            only_gen_bin_op=true,
+                            feature_prob=0.8)
         if !(tree in result)
             push!(result, tree)
         end

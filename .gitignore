@@ -30,3 +30,4 @@ deps/build.log
 stat.zip
 statprof
 .aider*
+.CondaPkg

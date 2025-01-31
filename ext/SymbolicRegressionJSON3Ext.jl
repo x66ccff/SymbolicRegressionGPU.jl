@@ -1,7 +1,7 @@
 module SymbolicRegressionJSON3Ext
 
 using JSON3: JSON3
-import SymbolicRegression.UtilsModule: json3_write
+import SymbolicRegressionGPU.UtilsModule: json3_write
 
 function json3_write(record, recorder_file)
     open(recorder_file, "w") do io

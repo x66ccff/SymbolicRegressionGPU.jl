@@ -25,7 +25,13 @@ import ..CoreModule: Options, Dataset
 
 using Printf: @sprintf
 using DynamicExpressions: Node, Expression
+using PythonCall
 
+const torch = PythonCall.pynew()
+
+function __init__()
+    PythonCall.pycopy!(torch, pyimport("torch"))
+end
 
 # 首先定义基础类型
 abstract type Operator end
@@ -403,8 +409,6 @@ function Base.show(io::IO, model::PSRN)
     return print(io, join([layer.out_dim for layer in model.layers], " → "))
 end
 
-function __init__()
-end
 
 # Export types and functions
 export PSRN,

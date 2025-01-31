@@ -832,15 +832,16 @@ mutable struct PSRNManager
     end
 end
 
-function select_top_subtrees( # TODO KK
+function select_top_subtrees(
     common_subtrees::Dict{Node,Int}, 
     n::Int, 
     options::AbstractOptions, 
     n_variables::Int;
-    ratio_subtrees::Float64=0.5
+    ratio_subtrees::Float64=0.5,
+    ratio_subtrees_crossover::Float64=0.4
 )
     # 确保比例之和不超过1
-    @assert ratio_subtrees <= 1.0 "Ratios sum must be <= 1.0"
+    @assert ratio_subtrees + ratio_subtrees_crossover <= 1.0 "Ratios sum must be <= 1.0"
     
     # 过滤复杂度过高的子树
     filtered_subtrees = filter(
@@ -866,34 +867,47 @@ function select_top_subtrees( # TODO KK
         push!(result, sorted_subtrees[i][1])
     end
 
-    # 添加随机变量
-    # 填充随机的树 （gen_random_tree）直到达到所需数量
-    
+    # # 如果有足够的子树，进行交叉操作
+    # if length(result) >= 2
+    #     n_crossover = floor(Int, n * ratio_subtrees_crossover)
+    #     for _ in 1:n_crossover
+    #         # 随机选择两个不同的子树
+    #         idx1 = rand(1:length(result))
+    #         idx2 = idx1
+    #         while idx2 == idx1
+    #             idx2 = rand(1:length(result))
+    #         end
+            
+    #         tree1, tree2 = result[idx1], result[idx2]
+            
+    #         # 进行交叉操作
+    #         new_tree1, new_tree2 = crossover_trees(tree1, tree2)
+            
+    #         # 随机选择其中一个新树添加到结果中
+    #         new_tree = rand() < 0.5 ? new_tree1 : new_tree2
+            
+    #         if !(new_tree in result)
+    #             push!(result, new_tree)
+    #         end
+    #     end
+    # end
+
+    # 填充随机的树直到达到所需数量
     while length(result) < n
-        random_tree_length = rand(3:10)
+        random_tree_length = rand(2:5)
         tree = gen_random_tree(random_tree_length, options, 
                             n_variables, Float32; 
                             only_gen_bin_op=true,
+                            only_gen_int_const=true,
                             feature_prob=0.8)
         if !(tree in result)
             push!(result, tree)
         end
     end
 
-
-
-    # # 填充随机常数直到达到所需数量
-    # remaining = n - length(result)
-    # for num in 1:remaining
-    #     val = (num % 2 == 0) ? num : -num
-    #     if rand(Bool)
-    #         val = val * (1 + randn())
-    #     end
-    #     push!(result, Node(; val=Float32(val)))
-    # end
-
     return result
 end
+
 
 function evaluate_subtrees(
     subtrees::Vector{Node}, dataset::Dataset, options::AbstractOptions
@@ -953,7 +967,7 @@ function evaluate_subtrees(
     return result
 end
 
-function analyze_common_subtrees(trees::Vector{<:Expression})
+function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
     # TODO - This is obviously not efficient, but it works for now
 
     subtree_counts = Dict{Node,Int}()
@@ -967,14 +981,19 @@ function analyze_common_subtrees(trees::Vector{<:Expression})
         end
     end
 
-    threshold = length(trees) * 0.01 # TODO need to adjust this threshold in tghe future
-    common_patterns = filter(p -> p.second >= threshold, subtree_counts)
+    # threshold = length(trees) * 0.01 # TODO need to adjust this threshold in tghe future
+    threshold = 2 # TODO need to adjust this threshold in tghe future
+    # compute_complexity(tree, options)
+    common_patterns = filter(p -> p.second >= threshold && 
+                        compute_complexity(p.first, options) >= 2, 
+                        subtree_counts)
 
     if !isempty(common_patterns)
-        # println("\nCommon subtree patterns:")
+        println("\n👉👉👉Common subtree patterns:")
         for (pattern, count) in common_patterns
             # println("- $(string_tree(pattern)) (appeared $count times)")
-            # @info pattern
+            @info "($count times) => $(pattern) "
+            @info pattern
         end
     end
 
@@ -1029,14 +1048,14 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
 
-            common_subtrees = analyze_common_subtrees(dominating_trees)
+            common_subtrees = analyze_common_subtrees(dominating_trees, options)
 
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
 
-            # @info "Selected subtrees:" top_subtrees
+            @info "Selected subtrees:" top_subtrees
             @info "✨Selected subtrees:"
             for expr in top_subtrees
-                @info expr
+               @info expr
             end
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)

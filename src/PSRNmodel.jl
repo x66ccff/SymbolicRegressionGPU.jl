@@ -62,6 +62,8 @@ const OPERATORS = Dict{String,Operator}(
     "Sub" => BinaryOperator("Sub", sub_kernel!, true, -),
     "Inv" => UnaryOperator("Inv", inv_kernel!, true, x -> 1 / x),
     "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> 0 - x),
+    "Square" => UnaryOperator("Square", square_kernel!, true, x -> square(x)),
+    "Cube" => UnaryOperator("Cube", cube_kernel!, true, x -> cube(x)),
 )
 
 # Script management

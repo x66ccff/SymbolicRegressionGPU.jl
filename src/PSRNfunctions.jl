@@ -147,6 +147,15 @@ function sqrt_kernel!(x::T) where T
     return sqrt(x)
 end
 
+function square_kernel!(x::T) where T
+    return square(x)
+end
+
+function cube_kernel!(x::T) where T
+    return cube(x)
+end
+
+
 # Binary operations
 function add_kernel!(x::T) where T
     return triu_sum(x)
@@ -176,6 +185,8 @@ export identity_kernel!,
     cos_kernel!,
     exp_kernel!,
     log_kernel!,
-    sqrt_kernel!
+    sqrt_kernel!,
+    square_kernel!,
+    cube_kernel!
 
 end

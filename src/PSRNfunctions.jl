@@ -148,11 +148,11 @@ function sqrt_kernel!(x::T) where T
 end
 
 function square_kernel!(x::T) where T
-    return square(x)
+    return x * x
 end
 
 function cube_kernel!(x::T) where T
-    return cube(x)
+    return x * x * x
 end
 
 

@@ -419,23 +419,20 @@ end
 
 function get_best_expr_and_MSE_topk(
     model::PSRN,
-    # X::TensorType{Float32,2}, #TODO 怎么好像变成 Pytorch.Tensor了？？是因为.so的设置不正确吗？改成Any之后就好了
-    # X::TensorType{Float32,2},
+    # X::TensorType{Float16,2},
     X::Any,
-    Y::Vector{Float32},
+    Y::Vector{Float16},
     n_top::Int,
     device_id::Int,
 )
-    # Calculate MSE for all expressions
-    batch_size = size(X, 1)
-    Y = Float32.(Y) # for saving memory
-    # sum_squared_errors = TensorType(zeros((1, model.out_dim)))
 
-    @time sum_squared_errors = TensorType(zeros(Float32, (1, model.out_dim))) # for saving memory
+    batch_size = size(X, 1)
+    Y = Float16.(Y)
+
+    @time sum_squared_errors = TensorType(zeros(Float16, (1, model.out_dim))) # for saving memory
 
     @time sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
 
-    # Compute sum of squared errors
     for i in 1:batch_size
         x_sliced = X[i:i, :]
 
@@ -450,38 +447,17 @@ function get_best_expr_and_MSE_topk(
         sum_squared_errors += square
     end
 
-    # Calculate mean
     mean_errors = sum_squared_errors ./ batch_size
-    # mean_errors = reshape(mean_errors, :)
-    # @info "mean_errors shape: $(size(mean_errors))"
 
-    # Get top-k indices and values using THC
-    # values, indices = THC.topk(mean_errors, n_top, largest=false, sorted=true)
     indices = topk_indices(mean_errors, n_top) + 1 # add 1 because the index is 0-based
 
-    # Convert to CPU for processing
-    # MSE_min_ls = Array(values)
     indices = Array(to(indices, CPU()))
 
-    # Get expressions for best indices
     expr_best_ls = Expression[]
-    # @info "Generating best expressions..."
-    # @info "indices: $indices"
-    # @info "length of indices: $(length(indices))"
-    # @info "type of indices: $(typeof(indices))"
+
     for i in indices
         push!(expr_best_ls, get_expr(model, i))
     end
-
-    # Print results
-    # println("Best expressions:")
-    # println("-"^20)
-    # for expr in expr_best_ls
-    # println(expr)
-    # end
-    # println("-"^20)
-
-    # GC.gc()
 
     return expr_best_ls
 end

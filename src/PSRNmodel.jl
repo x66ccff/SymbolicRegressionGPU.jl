@@ -27,9 +27,6 @@ using Printf: @sprintf
 using DynamicExpressions: Node, Expression
 
 
-# 使用全局变量
-global TensorType = Any
-
 # 首先定义基础类型
 abstract type Operator end
 
@@ -65,94 +62,24 @@ const OPERATORS = Dict{String,Operator}(
     "Cube" => UnaryOperator("Cube", cube_kernel!, true, x -> cube(x)),
 )
 
-# Script management
-mutable struct CompilationManager
-    cat_units::Dict{Int,Any}
-    topk_units::Dict{Int,Any}
-    initialized::Bool
-    
-    CompilationManager() = new(Dict{Int,Any}(), Dict{Int,Any}(), false)
-end
-
-const COMPILATION_MANAGER = CompilationManager()
-
-# Script generation functions
-function generate_cat_script(n::Int)
-    args = join(('a':'z')[1:n], ", ")
-    tensors = "(" * join(('a':'z')[1:n], ", ")  * ")"
-    return """
-    def main($args):
-        result = torch.cat($tensors, dim=1)
-        return result
-    """
-end
-
-function get_cat_unit(n::Int)
-    if !haskey(COMPILATION_MANAGER.cat_units, n)
-        script = generate_cat_script(n)
-        COMPILATION_MANAGER.cat_units[n] = PSRNtharray.THArrays_mod[].THJIT.compile(script)
-    end
-    return COMPILATION_MANAGER.cat_units[n]
-end
-
-function concat_tensors(tensors::Vector{T}) where T
-    n = length(tensors)
-    if n == 0
-        error("Cannot concatenate empty tensor list")
-    elseif n == 1
-        return tensors[1]
-    elseif n > 26
-        error("Maximum 26 tensors supported")
-    end
-
-    unit = get_cat_unit(n)
-    return unit.main(tensors...)
-end
-
-# 在 concat_tensors 函数之后添加以下代码
-
-function generate_topk_script(k::Int)
-    return """
-    def main(tensor):
-        _, indices = torch.topk(-tensor, k=$k, dim=1)  # 使用负号来获取最小值
-        return indices
-    """
-end
-
-function get_topk_unit(k::Int)
-    if !haskey(COMPILATION_MANAGER.topk_units, k)
-        script = generate_topk_script(k)
-        COMPILATION_MANAGER.topk_units[k] = PSRNtharray.THArrays_mod[].THJIT.compile(script)
-    end
-    return COMPILATION_MANAGER.topk_units[k]
-end
-
-function topk_indices(tensor::T, k::Int) where T
-    unit = get_topk_unit(k)
-    return unit.main(tensor)
-end
 
 # 之后定义其他结构和函数
 mutable struct DRLayer
     in_dim::Int
     out_dim::Int
-    dr_indices::TensorType
-    dr_mask::TensorType
+
+    dr_indices::Any
+    dr_mask::Any
     device::Int
 
     function DRLayer(in_dim::Int, dr_mask::Vector{Bool}, device::Int)
-        out_dim = sum(dr_mask)
-        arange_tensor = collect(0:(length(dr_mask) - 1))
-        dr_indices = PSRNtharray.THArrays_mod[].Tensor(arange_tensor[dr_mask])
-        dr_mask_tensor = PSRNtharray.THArrays_mod[].Tensor(dr_mask)
-        dr_indices = to(dr_indices, CUDA(device))
-        dr_mask_tensor = to(dr_mask_tensor, CUDA(device))
-        return new(in_dim, out_dim, dr_indices, dr_mask_tensor, device)
-    end
-end
+        # out_dim = sum(dr_mask)
+        # arange_tensor = collect(0:(length(dr_mask) - 1))
 
-function forward(layer::DRLayer, x::TensorType)
-    return x[:, layer.dr_mask]
+        # dr_indices = to(dr_indices, CUDA(device))
+        # dr_mask_tensor = to(dr_mask_tensor, CUDA(device))
+        return new(in_dim, out_dim, 1, 1, device)
+    end
 end
 
 function get_op_and_offset(layer::DRLayer, index::Int)
@@ -304,10 +231,7 @@ function get_offset_tensor(layer::SymbolLayer)
         offset_tensor[start:(start + len - 1), :] = t
         start += len
     end
-    # convert to TensorType
-    # offset_tensor = TensorType(offset_tensor)
-    # move to device
-    # offset_tensor = to(offset_tensor, CUDA(layer.device))
+
     return offset_tensor
 end
 
@@ -328,15 +252,6 @@ function get_op_and_offset(layer::SymbolLayer, index::Int)
     return layer.operator_list[op_idx], offset
 end
 
-function forward(layer::SymbolLayer, x::TensorType)
-    results = TensorType[]
-    for op in layer.operator_list
-        result = op.kernel(x)
-        push!(results, result)
-    end
-    res = concat_tensors(results)
-    return res
-end
 
 # PSRN implementation
 mutable struct PSRN
@@ -387,38 +302,12 @@ mutable struct PSRN
     end
 end
 
-function PSRN_forward(model::PSRN, x::TensorType)
-    h = x
-    # print the device of h
-    # @info "h device: $(on(x).index)"
-    for layer in model.layers
-        h = forward(layer, h)
-    end
-    return h
-end
 
-# function find_best_indices(outputs::TensorType, y::TensorType; top_k::Int=100)
-#     n_samples = size(outputs, 1)
-#     n_expressions = size(outputs, 2)
 
-#     # Calculate mean squared errors
-#     sum_squared_errors = sum((outputs .- y).^2, dims=1)
-#     mean_squared_errors = sum_squared_errors ./ n_samples
 
-#     # Handle invalid values
-#     mean_squared_errors = Array(mean_squared_errors)
-#     mean_squared_errors[isnan.(mean_squared_errors)] .= Inf32
-#     mean_squared_errors[isinf.(mean_squared_errors)] .= Inf32
-
-#     # Find indices of top_k smallest MSEs
-#     sorted_indices = partialsortperm(vec(mean_squared_errors), 1:min(top_k, length(mean_squared_errors)))
-
-#     return sorted_indices, mean_squared_errors[sorted_indices]
-# end
-
-function get_best_expr_and_MSE_topk(
+function get_best_expr_and_MSE_topk(  # TODO JIJIJI
     model::PSRN,
-    # X::TensorType{Float16,2},
+    # X::Matrix{Float16,2},
     X::Any,
     Y::Vector{Float16},
     n_top::Int,
@@ -428,35 +317,39 @@ function get_best_expr_and_MSE_topk(
     batch_size = size(X, 1)
     Y = Float16.(Y)
 
-    @time sum_squared_errors = TensorType(zeros(Float16, (1, model.out_dim))) # for saving memory
+    @info "typeof X,Y"
+    @info typeof(X)
+    @info typeof(Y)
 
-    @time sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
+    # sum_squared_errors = (zeros(Float16, (1, model.out_dim))) # for saving memory
 
-    for i in 1:batch_size
-        x_sliced = X[i:i, :]
+    # sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
 
-        x_sliced = to(x_sliced, CUDA(device_id))
+    # for i in 1:batch_size
+    #     x_sliced = X[i:i, :]
 
-        H = PSRN_forward(model, x_sliced) #   0.150774 seconds
+    #     x_sliced = to(x_sliced, CUDA(device_id))
 
-        diff = H .- Y[i]
+    #     H = PSRN_forward(model, x_sliced) #   0.150774 seconds
 
-        square = diff * diff # don't use ^2, because it will get Float64
+    #     diff = H .- Y[i]
 
-        sum_squared_errors += square
-    end
+    #     square = diff * diff # don't use ^2, because it will get Float64
 
-    mean_errors = sum_squared_errors ./ batch_size
+    #     sum_squared_errors += square
+    # end
 
-    indices = topk_indices(mean_errors, n_top) + 1 # add 1 because the index is 0-based
+    # mean_errors = sum_squared_errors ./ batch_size
 
-    indices = Array(to(indices, CPU()))
+    # indices = topk_indices(mean_errors, n_top) + 1 # add 1 because the index is 0-based
+
+    # indices = Array(to(indices, CPU()))
 
     expr_best_ls = Expression[]
 
-    for i in indices
-        push!(expr_best_ls, get_expr(model, i))
-    end
+    # for i in indices
+    #     push!(expr_best_ls, get_expr(model, i))
+    # end
 
     return expr_best_ls
 end
@@ -511,9 +404,6 @@ function Base.show(io::IO, model::PSRN)
 end
 
 function __init__()
-    COMPILATION_MANAGER.initialized = false
-    # 更新类型别名
-    @eval TensorType = PSRNtharray.THArrays_mod[].Tensor
 end
 
 # Export types and functions

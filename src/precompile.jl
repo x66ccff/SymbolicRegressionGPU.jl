@@ -64,11 +64,9 @@ function _precompile_psrn_evaluation()
                 options=options,
             )
             X_mapped = Float32.(X_mapped) # for saving memory
-            X_mapped = Tensor(X_mapped)
 
             device_id = 0
 
-            # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
             n_variables = size(X_mapped, 2)
             variable_names = ["x$i" for i in 1:n_variables]
             psrn.current_expr_ls = if isnothing(trees)

@@ -224,7 +224,6 @@ using DispatchDoctor: @stable
     include("ComposableExpression.jl")
     include("TemplateExpression.jl")
     include("ParametricExpression.jl")
-    include("PSRNtharray.jl")
     include("PSRNfunctions.jl")
     include("PSRNmodel.jl")
 end
@@ -332,8 +331,6 @@ using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
 import .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk
 
-# using .THArrays
-using ..PSRNtharray
 
 @stable default_mode = "disable" begin
     include("deprecates.jl")
@@ -1087,13 +1084,12 @@ function start_psrn_task(
             # to cuda 0
             X_mapped_sampled = Float16.(X_mapped_sampled) # for saving memory
             y_sampled = Float16.(y_sampled) # for saving memory
-            X_mapped_sampled = Tensor(X_mapped_sampled)
+
             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
 
             # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
             # y_sampled = to(y_sampled, CUDA(0))
 
-            # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
             n_variables = size(X_mapped_sampled, 2)
             variable_names = ["x$i" for i in 1:n_variables]
             manager.net.current_expr_ls = if isnothing(top_subtrees)
@@ -1132,19 +1128,19 @@ function start_psrn_task(
             # @info "best_expressions: $best_expressions"
         catch e
             bt = stacktrace(catch_backtrace())
-            @error """
-            PSRN task execution error:
-            Error type: $(typeof(e))
-            Error message: $e
-            Error location: $(bt[1])
-            Full stack:
-            $(join(string.(bt), "\n"))
-            """
             # @error """
             # PSRN task execution error:
             # Error type: $(typeof(e))
+            # Error message: $e
             # Error location: $(bt[1])
+            # Full stack:
+            # $(join(string.(bt), "\n"))
             # """
+            @error """
+            PSRN task execution error:
+            Error type: $(typeof(e))
+            Error location: $(bt[1])
+            """
         end
     end
 end

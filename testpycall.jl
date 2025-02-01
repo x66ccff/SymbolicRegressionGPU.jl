@@ -736,7 +736,6 @@ Add = pytype("Add", (CanCountLeaveOperator,), [
         function (self, in_dim=1, device=nothing)
             pybuiltins.super(Add, self).__init__()
             self.in_dim = in_dim
-            @info "🎇creating an Add() in_dim = $(in_dim)"
             self.out_dim = in_dim * (in_dim + 1) ÷ 2
             self.is_unary = pybool(false)
             self.is_directed = pybool(false)
@@ -753,6 +752,135 @@ Add = pytype("Add", (CanCountLeaveOperator,), [
                 self.in_dim, self.in_dim, offset=0, dtype=torch.int32, device=x.device
             )
             out = x[pyslice(0,2), indices[0]] + x[pyslice(0,2), indices[1]]
+            return out
+        end
+    )
+])
+
+# Sub类
+Sub = pytype("Sub", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Sub, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim * in_dim
+            self.is_unary = pybool(false)
+            self.is_directed = pybool(true)
+            self.complexity = 1
+            self.operator = Sub_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            num = x.view(1, -1, 1)
+            deno = x.view(1, 1, -1)
+            out = (num - deno).view(1, -1)
+            return out
+        end
+    )
+])
+
+# Div类
+Div = pytype("Div", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing, threshold=1e-10)
+            pybuiltins.super(Div, self).__init__()
+            self.threshold = threshold
+            self.in_dim = in_dim 
+            self.out_dim = in_dim * in_dim
+            self.is_unary = pybool(false)
+            self.is_directed = pybool(true)
+            self.complexity = 2
+            self.operator = Div_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            num = x.view(1, -1, 1)
+            deno = x.view(1, 1, -1)
+            out = (num / deno).view(1, -1)
+            return out
+        end
+    )
+])
+
+# SemiDiv类
+SemiDiv = pytype("SemiDiv", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing, threshold=1e-10)
+            pybuiltins.super(SemiDiv, self).__init__()
+            self.threshold = threshold
+            self.in_dim = in_dim
+            self.out_dim = in_dim * (in_dim + 1) ÷ 2
+            self.is_unary = pybool(false) 
+            self.is_directed = pybool(false)
+            self.complexity = 2
+            self.operator = SemiDiv_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            indices = torch.triu_indices(
+                self.in_dim, self.in_dim, offset=0, dtype=torch.int32, device=x.device
+            )
+            deno = x[pyslice(0,2), indices[1]]
+            num = x[pyslice(0,2), indices[0]]
+            return num / deno
+        end
+    )
+])
+
+# SemiSub类
+SemiSub = pytype("SemiSub", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(SemiSub, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim * (in_dim + 1) ÷ 2
+            self.is_unary = pybool(false)
+            self.is_directed = pybool(false)
+            self.complexity = 1
+            self.operator = SemiSub_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            indices = torch.triu_indices(
+                self.in_dim, self.in_dim, offset=0, dtype=torch.int32, device=x.device
+            )
+            out = x[pyslice(0,2), indices[0]] - x[pyslice(0,2), indices[1]]
             return out
         end
     )
@@ -874,6 +1002,202 @@ Sigmoid = pytype("Sigmoid", (CanCountLeaveOperator,), [
     )
 ])
 
+# Sign类
+Sign = pytype("Sign", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Sign, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim
+            self.is_unary = pybool(true)
+            self.is_directed = pybool(true)
+            self.complexity = 4
+            self.operator = Sign_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            return torch.sign(x)
+        end
+    )
+])
+
+# Pow2类
+Pow2 = pytype("Pow2", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Pow2, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim
+            self.is_unary = pybool(true)
+            self.is_directed = pybool(true)
+            self.complexity = 2
+            self.operator = Pow2_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            return x^2
+        end
+    )
+])
+
+# Pow3类
+Pow3 = pytype("Pow3", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Pow3, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim
+            self.is_unary = pybool(true)
+            self.is_directed = pybool(true)
+            self.complexity = 3
+            self.operator = Pow3_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            return x^3
+        end
+    )
+])
+
+# Abs类
+Abs = pytype("Abs", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Abs, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim
+            self.is_unary = pybool(true)
+            self.is_directed = pybool(true)
+            self.complexity = 4
+            self.operator = Abs_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            return torch.abs(x)
+        end
+    )
+])
+
+# Cosh类
+Cosh = pytype("Cosh", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Cosh, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim
+            self.is_unary = pybool(true)
+            self.is_directed = pybool(true)
+            self.complexity = 4
+            self.operator = Cosh_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            return torch.cosh(x)
+        end
+    )
+])
+
+# Tanh类
+Tanh = pytype("Tanh", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Tanh, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim
+            self.is_unary = pybool(true)
+            self.is_directed = pybool(true)
+            self.complexity = 4
+            self.operator = Tanh_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            return torch.tanh(x)
+        end
+    )
+])
+
+# Sqrt类
+Sqrt = pytype("Sqrt", (CanCountLeaveOperator,), [
+    "__module__" => "__main__",
+    pyfunc(
+        name = "__init__",
+        function (self, in_dim=1, device=nothing)
+            pybuiltins.super(Sqrt, self).__init__()
+            self.in_dim = in_dim
+            self.out_dim = in_dim
+            self.is_unary = pybool(true)
+            self.is_directed = pybool(true)
+            self.complexity = 3
+            self.operator = Sqrt_op()
+            self.device = device
+            return
+        end
+    ),
+    pyfunc(
+        name = "forward",
+        function (self, x, second_device=pybuiltins.None)
+            if !pyis(second_device, pybuiltins.None)
+                x = x.to(second_device)
+            end
+            return torch.sqrt(x)
+        end
+    )
+])
+
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # x = torch.randint(-1, 5, (3, 5))
@@ -891,9 +1215,49 @@ op_dict = Dict(
     pystr("Mul") => Mul_op(),
     pystr("Identity") => Identity_op(),
     pystr("Sin") => Sin_op(),
+    pystr("Cos") => Cos_op(),
     pystr("Exp") => Exp_op(),
+    pystr("Log") => Log_op(),
     pystr("Neg") => Neg_op(),
-    pystr("Inv") => Inv_op()
+    pystr("Inv") => Inv_op(),
+    pystr("Div") => Div_op(),
+    pystr("Sub") => Sub_op(),
+    pystr("SemiDiv") => SemiDiv_op(),
+    pystr("SemiSub") => SemiSub_op(),
+    pystr("Sign") => Sign_op(),
+    pystr("Pow2") => Pow2_op(),
+    pystr("Pow3") => Pow3_op(),
+    pystr("Pow") => Pow_op(),
+    pystr("Sigmoid") => Sigmoid_op(),
+    pystr("Abs") => Abs_op(),
+    pystr("Cosh") => Cosh_op(),
+    pystr("Tanh") => Tanh_op(),
+    pystr("Sqrt") => Sqrt_op()
+)
+
+kernel_dict = Dict(
+    pystr("Add") => Add,
+    pystr("Mul") => Mul,
+    pystr("Identity") => Identity,
+    pystr("Sin") => Sin,
+    pystr("Cos") => Cos,
+    pystr("Exp") => Exp,
+    pystr("Log") => Log,
+    pystr("Neg") => Neg,
+    pystr("Inv") => Inv,
+    pystr("Div") => Div,
+    pystr("Sub") => Sub,
+    pystr("SemiDiv") => SemiDiv,
+    pystr("SemiSub") => SemiSub,
+    pystr("Sign") => Sign,
+    pystr("Pow2") => Pow2,
+    pystr("Pow3") => Pow3,
+    pystr("Pow") => Pow,
+    pystr("Sigmoid") => Sigmoid,
+    pystr("Abs") => Abs,
+    pystr("Cosh") => Cosh,
+    pystr("Tanh") => Tanh,
+    pystr("Sqrt") => Sqrt
 )
 
 
@@ -950,31 +1314,27 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             self.n_triu = pyfloordiv(in_dim * (in_dim + 1), 2)
             self.in_dim_square = in_dim * in_dim
 
-            self.out_dim_cum_ls = pylist([])
+            self.out_dim_cum_ls = Py(nothing)
             self.list = pylist([])
             self.offset_tensor = Py(nothing)
             
+            for op_str in operators
+                self.list.append(kernel_dict[op_str](in_dim))
+            end
 
-            @info "in_dim julia 🍬 $(in_dim)"
-            @info "in_dim python 🍬 $(Py(in_dim))"
-            self.list.append(Add(Py(in_dim)))
-            # @info "inner: $(Add.in_dim)"
-            self.list.append(Mul(Py(in_dim)))
-            
             # 计算输出维度
             self.out_dim = 0
             for op_str in operators
                 op = op_dict[op_str]
-                if !pyconvert(Bool, op.is_directed) && !pyconvert(Bool, op.is_unary)
-                    res = pyconvert(Int, in_dim) * (pyconvert(Int, in_dim) + 1) ÷ 2
-                    @info "加了 $res ，因为 $op"
-                    self.out_dim += res
-                else
-                    @info "op是😂 $op"
+                if pyconvert(Bool, op.is_unary)
                     res = pyconvert(Int, in_dim)
-                    @info "加了 $res ，因为 $op"
-                    self.out_dim += res
+                else
+                    res = pyconvert(Bool, op.is_directed) ? 
+                          pyconvert(Int, in_dim)^2 : 
+                          pyconvert(Int, in_dim) * (pyconvert(Int, in_dim) + 1) ÷ 2
                 end
+                @info "加了 $res ，因为 $op"
+                self.out_dim += res
             end
 
             @assert pylen(operators) == pylen(self.list)
@@ -1071,23 +1431,25 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
     pyfunc(
         name = "get_out_dim_cum_ls",
         function (self)
-            if self.out_dim_cum_ls !== nothing
+            if !pyconvert(Bool, pyis(self.out_dim_cum_ls, Py(nothing)))
                 return self.out_dim_cum_ls
             end
             
-            out_dim_ls = []
+            out_dim_ls = pylist([])
             for func in self.list
-                if !func.is_unary
-                    if func.is_directed
-                        push!(out_dim_ls, self.in_dim_square)
+                if !pyconvert(Bool, func.is_unary)
+                    if pyconvert(Bool, func.is_directed)
+                        out_dim_ls.append(self.in_dim_square)
                     else
-                        push!(out_dim_ls, self.n_triu)
+                        out_dim_ls.append(self.n_triu)
                     end
                 else
-                    push!(out_dim_ls, self.in_dim)
+                    out_dim_ls.append(self.in_dim)
                 end
             end
-            self.out_dim_cum_ls = [sum(out_dim_ls[1:i]) for i in 1:length(out_dim_ls)]
+            self.out_dim_cum_ls = [sum(out_dim_ls[pyslice(nothing,i+1)]) for i in 0:length(out_dim_ls)-1]
+            @info "self.out_dim_cum_ls"
+            @info self.out_dim_cum_ls
             return self.out_dim_cum_ls
         end
     ),
@@ -1097,8 +1459,8 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             out_dim_cum_ls = self.get_out_dim_cum_ls()
             i = 0
             for (idx, val) in enumerate(out_dim_cum_ls)
-                if index < val
-                    i = idx
+                if pyconvert(Bool, pylt(index,val))
+                    i = idx - 1
                     break
                 end
             end
@@ -1230,6 +1592,8 @@ PSRN = pytype("PSRN", (nn.Module,), [
             else
                 # SymbolLayer
                 func_op, offset = layer.get_op_and_offset(index)
+                # @info "func_op, offset <======== index"
+                # @info "$func_op, $offset <======== $index"
                 if pyconvert(Bool, func_op.is_unary)
                     return func_op.get_expr(self._get_expr(offset[0], layer_idx - 1))
                 else
@@ -1253,13 +1617,16 @@ function test_psrn()
     # device = torch.device(is_cuda_available ? "cpu" : "cpu")
     println("Using device: ", device)
 
-    n_variables = 2
-    n_symbol_layers = 2
+    n_variables = 3
+    n_symbol_layers = 3
+
+    # n_variables = 1
+    # n_symbol_layers = 1
 
     # 创建PSRN模型
     model = PSRN(
         Py(n_variables),  # n_variables
-        Py(["Add", "Mul"]),  # operators
+        Py(["Add", "Mul", "Sub", "Div", "Identity", "Neg", "Inv", "Cos", "Sin","Exp","Log"]),  # operators
         Py(n_symbol_layers),  # n_symbol_layers
         pybuiltins.None,  # dr_mask
         device  # device
@@ -1288,11 +1655,12 @@ function test_psrn()
     @info output.shape
     
     # 设置底层表达式列表
-    model.current_expr_ls = pylist(["x$i" for i in 0:n_variables])
+    model.current_expr_ls = pylist(["x$i" for i in 0:n_variables-1])
+    @info model.current_expr_ls
 
     # 获取一些表达式示例
     println("\nSome expression examples:")
-    for i in 0:41
+    for i in 0:min(1000,pyconvert(Int,output.shape[1]))-1
         expr = model.get_expr(i)
         println("Expression $i: ", expr)
     end

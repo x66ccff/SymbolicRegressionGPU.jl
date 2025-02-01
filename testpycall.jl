@@ -935,6 +935,8 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             self.in_dim = in_dim
             self.operators = operators
             self.device = device
+
+            self.list = []
             
             # 初始化运算符字典
             self.op_dict = Dict(

@@ -965,9 +965,9 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
     pyfunc(
         name = "forward",
         function (self, x)
-            h = []
+            h = pylist([])
             for md in self.list
-                push!(h, md(x))
+                h.append(md(x))
             end
             h = torch.cat(h, dim=2)
             return h
@@ -1114,7 +1114,9 @@ PSRN = pytype("PSRN", (nn.Module,), [
             end
             
             # 构建层
+            @info "构建层"
             for i in 1:pyconvert(Int, n_symbol_layers)
+                @info "构建第 $i 层"
                 if pyconvert(Bool, pygt(pylen(self.list), 0)) && pyconvert(Bool, self.use_dr_mask) && pyconvert(Bool, pyeq(i, n_symbol_layers))
                     last_layer = self.list[pylen(self.list) - 1]  # Python的索引从0开始
                     self.list.append(
@@ -1132,11 +1134,14 @@ PSRN = pytype("PSRN", (nn.Module,), [
                         SymbolLayer(last_layer.out_dim, operators, device=self.device)
                     )
                 end
+                @info "长度 $(pylen(self.list))"
             end
             
             self.current_expr_ls = []
             last_layer = self.list[pylen(self.list) - 1]  # 获取最后一层
             self.out_dim = last_layer.out_dim
+
+            @info "self.out_dim = $(self.out_dim)"
             
             return
         end

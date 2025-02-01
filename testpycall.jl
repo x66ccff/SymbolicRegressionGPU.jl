@@ -1095,7 +1095,7 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
         name = "get_op_and_offset",
         function (self, index)
             out_dim_cum_ls = self.get_out_dim_cum_ls()
-            i = 1
+            i = 0
             for (idx, val) in enumerate(out_dim_cum_ls)
                 if index < val
                     i = idx
@@ -1103,7 +1103,7 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
                 end
             end
             func = self.list[i]
-            offset = self.offset_tensor[index+1].tolist()
+            offset = self.offset_tensor[index].tolist()
             return func.operator, offset
         end
     )
@@ -1212,7 +1212,7 @@ PSRN = pytype("PSRN", (nn.Module,), [
     pyfunc(
         name = "get_expr",
         function (self, index)
-            return self._get_expr(index, Py(-1))
+            return self._get_expr(index, -1)
         end
     ),
     pyfunc(
@@ -1253,7 +1253,7 @@ function test_psrn()
     # device = torch.device(is_cuda_available ? "cpu" : "cpu")
     println("Using device: ", device)
 
-    n_variables = 10
+    n_variables = 2
     n_symbol_layers = 2
 
     # 创建PSRN模型
@@ -1292,8 +1292,8 @@ function test_psrn()
 
     # 获取一些表达式示例
     println("\nSome expression examples:")
-    for i in 0:5
-        expr = model.get_expr(Py(i))
+    for i in 0:41
+        expr = model.get_expr(i)
         println("Expression $i: ", expr)
     end
     

@@ -719,10 +719,13 @@ Mul = pytype("Mul", (CanCountLeaveOperator,), [
             if !pyis(second_device, pybuiltins.None)
                 x = x.to(second_device)
             end
+            @info "here?"
             indices = torch.triu_indices(
                 self.in_dim, self.in_dim, offset=0, dtype=torch.int32, device=x.device
             )
+            @info "here!"
             out = x[:, indices[1]] * x[:, indices[2]]
+            @info "here!!"
             return out
         end
     )
@@ -747,14 +750,14 @@ Add = pytype("Add", (CanCountLeaveOperator,), [
     ),
     pyfunc(
         name = "forward",
-        function (self, x, second_device=pybuiltins.None)
-            if !pyis(second_device, pybuiltins.None)
-                x = x.to(second_device)
-            end
+        function (self, x)
+            @info "here?"
             indices = torch.triu_indices(
                 self.in_dim, self.in_dim, offset=0, dtype=torch.int32, device=x.device
             )
-            out = x[:, indices[1]] + x[:, indices[2]]
+            @info "here!"
+            out = x[pyslice(0,-1), indices[0]] + x[pyslice(0,-1), indices[1]]
+            @info "here!!"
             return out
         end
     )
@@ -936,7 +939,7 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             self.operators = operators
             self.device = device
 
-            self.list = []
+            self.list = pylist([])
             
             # 初始化运算符字典
             self.op_dict = Dict(
@@ -948,6 +951,7 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
                 "Neg" => Neg(),
                 "Inv" => Inv()
             )
+            self.list.append(Add())
             
             # 计算输出维度
             self.out_dim = 0
@@ -958,6 +962,9 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
                     self.out_dim += pyconvert(Int, in_dim)
                 end
             end
+
+            @info "self.out_dim"
+            @info self.out_dim
             
             return
         end
@@ -966,8 +973,24 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
         name = "forward",
         function (self, x)
             h = pylist([])
-            for md in self.list
-                h.append(md(x))
+            @info "self.list"
+            @info self.list
+
+            @info "try to get the first..."
+            a = self.list[0]
+            @info a
+            @info "try to forward ..."
+            res = a(x)
+            @info res
+            # for md in self.list
+            for i in 1:pylen(self.list)
+                # h.append(md(x))
+                md = self.list[pyindex(i-1)]
+                res = md(x)
+                @info "res"
+                @info res
+                push!(h, res)
+                @info "here"
             end
             h = torch.cat(h, dim=2)
             return h
@@ -1223,9 +1246,15 @@ function test_psrn()
     model = model.to(device)
     
     # 创建一些随机输入数据
-    x = torch.randn((2, 3), device=device)
+    x = torch.randn((1, 3), device=device)
     println("\nInput shape: ", x.shape)
     println("Input data:\n", x)
+
+    # test Add()
+    myadd = Add(Py(3))
+    println("\nAdd(): ", myadd)
+    println("Add():\n", myadd(x))
+
     
     # 前向传播
     output = model(x)

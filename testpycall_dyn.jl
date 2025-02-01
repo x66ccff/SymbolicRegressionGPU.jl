@@ -43,7 +43,7 @@ Sin_op = pytype("Sin_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> sin(sub_expr)
+        (self, sub_expr) -> sin(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -64,7 +64,7 @@ Cos_op = pytype("Cos_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> cos(sub_expr)
+        (self, sub_expr) -> cos(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -86,7 +86,7 @@ Exp_op = pytype("Exp_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> exp(sub_expr)
+        (self, sub_expr) -> exp(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -108,7 +108,7 @@ Log_op = pytype("Log_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> safe_log(sub_expr)
+        (self, sub_expr) -> log(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -442,7 +442,7 @@ Abs_op = pytype("Abs_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> abs(sub_expr)
+        (self, sub_expr) -> abs(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -464,7 +464,7 @@ Cosh_op = pytype("Cosh_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> cosh(sub_expr)
+        (self, sub_expr) -> cosh(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -486,7 +486,7 @@ Tanh_op = pytype("Tanh_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> tanh(sub_expr)
+        (self, sub_expr) -> tanh(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -508,7 +508,7 @@ Sqrt_op = pytype("Sqrt_op", (), [
     ),
     pyfunc(
         name = "get_expr",
-        (self, sub_expr) -> sqrt(sub_expr)
+        (self, sub_expr) -> sqrt(pyconvert(Expression,sub_expr))
     ),
     pyfunc(
         name = "transform_inputs",
@@ -1597,7 +1597,8 @@ PSRN = pytype("PSRN", (nn.Module,), [
                 # @info "func_op, offset <======== index"
                 # @info "$func_op, $offset <======== $index"
                 if pyconvert(Bool, func_op.is_unary)
-                    return func_op.get_expr(self._get_expr(offset[0], layer_idx - 1))
+                    return func_op.get_expr(
+                        self._get_expr(offset[0], layer_idx - 1))
                 else
                     return func_op.get_expr(
                         self._get_expr(offset[0], layer_idx - 1),
@@ -1628,8 +1629,8 @@ function test_psrn()
     # 创建PSRN模型
     model = PSRN(
         Py(n_variables),  # n_variables
-        # Py(["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin","Exp","Log"]),  # operators cos, inv bug todo
-        Py(["Add", "Mul", "Sub", "Div", "Identity"]),  # operators
+        Py(["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin","Exp","Log"]),  # operators cos, inv bug todo
+        # Py(["Add", "Mul", "Sub", "Div", "Identity"]),  # operators
         Py(n_symbol_layers),  # n_symbol_layers
         pybuiltins.None,  # dr_mask
         device  # device

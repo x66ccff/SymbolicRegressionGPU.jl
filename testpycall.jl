@@ -752,12 +752,23 @@ Add = pytype("Add", (CanCountLeaveOperator,), [
         name = "forward",
         function (self, x)
             @info "here?"
+            @info "x"
+            @info x 
+            @info "x.shape"
+            @info x.shape
+
             indices = torch.triu_indices(
                 self.in_dim, self.in_dim, offset=0, dtype=torch.int32, device=x.device
             )
+            @info "indices"
+            @info indices
+
             @info "here!"
-            out = x[pyslice(0,-1), indices[0]] + x[pyslice(0,-1), indices[1]]
+            out = x[pyslice(0,2), indices[0]] + x[pyslice(0,2), indices[1]]
             @info "here!!"
+            @info "out"
+            @info out
+            @info out.shape
             return out
         end
     )
@@ -989,7 +1000,8 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
                 res = md(x)
                 @info "res"
                 @info res
-                push!(h, res)
+                # push!(h, res)
+                h.append(res)
                 @info "here"
             end
             h = torch.cat(h, dim=2)

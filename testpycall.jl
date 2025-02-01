@@ -749,16 +749,10 @@ Add = pytype("Add", (CanCountLeaveOperator,), [
     pyfunc(
         name = "forward",
         function (self, x)
-            @info "forwarding x..."
-            @info "x: $(x.shape) $x"
-            @info "self.in_dim $(self.in_dim)"
-            @info "self.out_dim $(self.out_dim)"
             indices = torch.triu_indices(
                 self.in_dim, self.in_dim, offset=0, dtype=torch.int32, device=x.device
             )
-            @info "indices $(indices.shape) $indices"
             out = x[pyslice(0,2), indices[0]] + x[pyslice(0,2), indices[1]]
-            @info "out $out"
             return out
         end
     )
@@ -891,6 +885,19 @@ Sigmoid = pytype("Sigmoid", (CanCountLeaveOperator,), [
 # println(out)
 
 
+# 初始化运算符字典
+op_dict = Dict(
+    pystr("Add") => Add_op(),
+    pystr("Mul") => Mul_op(),
+    pystr("Identity") => Identity_op(),
+    pystr("Sin") => Sin_op(),
+    pystr("Exp") => Exp_op(),
+    pystr("Neg") => Neg_op(),
+    pystr("Inv") => Inv_op()
+)
+
+
+
 # Duplicate Removal Layer
 DRLayer = pytype("DRLayer", (nn.Module,), [
     "__module__" => "__main__",
@@ -940,7 +947,6 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             self.operators = operators
             self.device = device
 
-            self.in_dim = in_dim
             self.n_triu = pyfloordiv(in_dim * (in_dim + 1), 2)
             self.in_dim_square = in_dim * in_dim
 
@@ -948,16 +954,7 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             self.list = pylist([])
             self.offset_tensor = Py(nothing)
             
-            # 初始化运算符字典
-            self.op_dict = Dict(
-                "Add" => Add(),
-                "Mul" => Mul(),
-                "Identity" => Identity(),
-                "Sin" => Sin(),
-                "Exp" => Exp(),
-                "Neg" => Neg(),
-                "Inv" => Inv()
-            )
+
             @info "in_dim julia 🍬 $(in_dim)"
             @info "in_dim python 🍬 $(Py(in_dim))"
             self.list.append(Add(Py(in_dim)))
@@ -966,13 +963,14 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             
             # 计算输出维度
             self.out_dim = 0
-            for op in operators
-                if op in ["Add", "Mul"]
-                    
+            for op_str in operators
+                op = op_dict[op_str]
+                if !pyconvert(Bool, op.is_directed) && !pyconvert(Bool, op.is_unary)
                     res = pyconvert(Int, in_dim) * (pyconvert(Int, in_dim) + 1) ÷ 2
                     @info "加了 $res ，因为 $op"
                     self.out_dim += res
                 else
+                    @info "op是😂 $op"
                     res = pyconvert(Int, in_dim)
                     @info "加了 $res ，因为 $op"
                     self.out_dim += res
@@ -994,30 +992,12 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
         name = "forward",
         function (self, x)
             h = pylist([])
-            @info "self.list"
-            @info self.list
-
-            @info "try to get the first..."
-            a = self.list[0]
-            @info a
-            @info "try to forward ..."
-            res = a(x)
-            @info res
-            # for md in self.list
             for i in 1:pylen(self.list)
-                # h.append(md(x))
                 md = self.list[pyindex(i-1)]
-                @info "👀md"
-                @info md
                 res = md(x)
-                @info "👉👉res"
-                @info res
-                # push!(h, res)
                 h.append(res)
-                @info "here"
             end
             @info "h ============"
-            @info h
             h = torch.cat(h, dim=1)
             return h
         end
@@ -1032,7 +1012,6 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
         name = "get_offset_tensor",
         function (self)
             device = self.device
-            @info "self.out_dim $(self.out_dim)"
             offset_tensor = torch.zeros((self.out_dim, 2), dtype=torch.int, device=device)
             arange_tensor = torch.arange(self.in_dim, dtype=torch.int, device=device)
             
@@ -1042,75 +1021,41 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
             
             unary_tensor[pyslice(nothing), 0] = arange_tensor
             unary_tensor[pyslice(nothing), 1] = self.in_dim
-            
-            # start = 1
-            # for i in 1:pyconvert(Int, self.in_dim)
-            #     len_ = self.in_dim - i + 1
-            #     binary_U_tensor[pyslice(start,start+len_-1), 0] = pyint(i)
-            #     binary_U_tensor[pyslice(start,start+len_-1), 1] = arange_tensor[pyslice(i,-1)]
-            #     start += len_
-            # end
-            
-            # start = 1
-            # for i in 1:pyconvert(Int, self.in_dim)
-            #     len_ = self.in_dim
-            #     binary_D_tensor[pyslice(start,start+len_-1), 0] = pyint(i)
-            #     binary_D_tensor[pyslice(start,start+len_-1), 1] = arange_tensor[pyslice(1,-1)]
-            #     start += len_
-            # end
-            @info "😊"
 
             start = 0
             for i in 0:pyconvert(Int, self.in_dim) - 1
-                @info "😊"
+                
                 len_ = self.in_dim - i
-                @info "😊"
+                
                 binary_U_tensor[pyslice(start , start + len_), 0] = pyint(i)
-                @info "😊"
+                
                 binary_U_tensor[pyslice(start , start + len_), 1] = arange_tensor[pyslice(i,nothing)]
-                @info "😊"
+                
                 start += len_
             end
-    
-            @info "😊😊"
+            
             start = 0
             for i in 0:pyconvert(Int, self.in_dim) - 1
-                @info "😊😊"
-
                 len_ = self.in_dim
                 binary_D_tensor[pyslice(start , start + len_), 0] = pyint(i)
-                @info "😊😊 <<<<"
                 binary_D_tensor[pyslice(start , start + len_), 1] = arange_tensor[pyslice(0,nothing)]
                 start += len_    
-                @info "😊😊 <<"
             end
-
-            @info "😊😊😊"
 
             start = 0
             for func in self.list
-                @info "😊😊😊"
                 if !pyconvert(Bool, func.is_unary)
-                    @info "😊😊😊《《"
                     if pyconvert(Bool,func.is_directed)
-                        @info "😊😊😊《《《《 DDD"
                         t = binary_D_tensor
-                        @info "😊😊😊《《《《  DDDD  end "
                     else
-                        @info "😊😊😊《《《《 UUU"
                         t = binary_U_tensor
-                        @info "😊😊😊《《《《  UUUend "
+
                     end
                 else
-                    @info "😊😊😊《《《《《《《"
                     t = unary_tensor
                 end
                 len_ = t.shape[0]
                 
-                @info "t shape:"
-                @info t.shape
-                @info "start $(start)"
-                @info "len_ $(len_)"
                 if ((pyconvert(Int, start) + pyconvert(Int, len_)) <= pyconvert(Int, self.out_dim))
                 # if pyle(start + len_, self.out_dim)
                     offset_tensor[pyslice(start,start + len_,nothing)] = t
@@ -1331,7 +1276,6 @@ function test_psrn()
     myadd = Add(Py(3))
     println("\nAdd(): ", myadd)
     res = myadd(x)
-    @info myadd(x)
     @info myadd(x).shape
     @info "👆"
 
@@ -1340,8 +1284,8 @@ function test_psrn()
     # 前向传播
     output = model(x)
     println("\nOutput shape: ", output.shape)
-    @info "output"
-    @info output
+    @info "output.shape"
+    @info output.shape
     
     # 设置底层表达式列表
     PSRN.current_expr_ls = ["x","y","z"]

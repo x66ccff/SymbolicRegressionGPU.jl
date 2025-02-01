@@ -1124,8 +1124,7 @@ PSRN = pytype("PSRN", (nn.Module,), [
             # 设置设备
             if pyconvert(Bool, pyisinstance(device, pybuiltins.str))
                 if pyconvert(Bool, pyeq(device, "cuda"))
-                    # self.device = torch.device("cuda")
-                    self.device = torch.device("cpu")
+                    self.device = torch.device("cuda")
                 elseif pyconvert(Bool, pyeq(device, "cpu"))
                     self.device = torch.device("cpu")
                 else
@@ -1220,10 +1219,10 @@ PSRN = pytype("PSRN", (nn.Module,), [
         name = "_get_expr",
         function (self, index, layer_idx)
             if pyconvert(Bool, pylt(pylen(self.list) + layer_idx, 0))
-                return self.current_expr_ls[index + 1]
+                return self.current_expr_ls[index]
             end
             
-            layer = self.list[pylen(self.list) + layer_idx]
+            layer = self.list[layer_idx]
             
             if layer._get_name() == "DRLayer"
                 new_index = layer.get_op_and_offset(index)
@@ -1231,13 +1230,12 @@ PSRN = pytype("PSRN", (nn.Module,), [
             else
                 # SymbolLayer
                 func_op, offset = layer.get_op_and_offset(index)
-                
                 if pyconvert(Bool, func_op.is_unary)
-                    return func_op.get_expr(self._get_expr(offset[1], layer_idx - 1))
+                    return func_op.get_expr(self._get_expr(offset[0], layer_idx - 1))
                 else
                     return func_op.get_expr(
-                        self._get_expr(offset[1], layer_idx - 1),
-                        self._get_expr(offset[2], layer_idx - 1)
+                        self._get_expr(offset[0], layer_idx - 1),
+                        self._get_expr(offset[1], layer_idx - 1)
                     )
                 end
             end
@@ -1251,15 +1249,18 @@ PSRN = pytype("PSRN", (nn.Module,), [
 function test_psrn()
     # 检查是否有可用的CUDA设备
     is_cuda_available = pyconvert(Bool, torch.cuda.is_available())
-    # device = torch.device(is_cuda_available ? "cuda" : "cpu")
-    device = torch.device(is_cuda_available ? "cpu" : "cpu")
+    device = torch.device(is_cuda_available ? "cuda" : "cpu")
+    # device = torch.device(is_cuda_available ? "cpu" : "cpu")
     println("Using device: ", device)
+
+    n_variables = 10
+    n_symbol_layers = 2
 
     # 创建PSRN模型
     model = PSRN(
-        Py(3),  # n_variables
+        Py(n_variables),  # n_variables
         Py(["Add", "Mul"]),  # operators
-        Py(2),  # n_symbol_layers
+        Py(n_symbol_layers),  # n_symbol_layers
         pybuiltins.None,  # dr_mask
         device  # device
     )
@@ -1268,17 +1269,16 @@ function test_psrn()
     model = model.to(device)
     
     # 创建一些随机输入数据
-    x = torch.randn((1, 3), device=device)
+    x = torch.randn((1, n_variables), device=device)
     println("\nInput shape: ", x.shape)
     println("Input data:\n", x)
 
     # test Add()
-    myadd = Add(Py(3))
+    myadd = Add(Py(n_variables))
     println("\nAdd(): ", myadd)
     res = myadd(x)
     @info myadd(x).shape
     @info "👆"
-
 
     
     # 前向传播
@@ -1288,12 +1288,12 @@ function test_psrn()
     @info output.shape
     
     # 设置底层表达式列表
-    PSRN.current_expr_ls = ["x","y","z"]
+    model.current_expr_ls = pylist(["x$i" for i in 0:n_variables])
 
     # 获取一些表达式示例
     println("\nSome expression examples:")
-    for i in 1:3
-        expr = model.get_expr(Py(i-1))
+    for i in 0:5
+        expr = model.get_expr(Py(i))
         println("Expression $i: ", expr)
     end
     

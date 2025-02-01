@@ -1032,6 +1032,7 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
         name = "get_offset_tensor",
         function (self)
             device = self.device
+            @info "self.out_dim $(self.out_dim)"
             offset_tensor = torch.zeros((self.out_dim, 2), dtype=torch.int, device=device)
             arange_tensor = torch.arange(self.in_dim, dtype=torch.int, device=device)
             
@@ -1086,24 +1087,36 @@ SymbolLayer = pytype("SymbolLayer", (nn.Module,), [
 
             @info "😊😊😊"
 
-            start = 1
+            start = 0
             for func in self.list
                 @info "😊😊😊"
                 if !pyconvert(Bool, func.is_unary)
                     @info "😊😊😊《《"
                     if pyconvert(Bool,func.is_directed)
-                        @info "😊😊😊《《《《"
+                        @info "😊😊😊《《《《 DDD"
                         t = binary_D_tensor
+                        @info "😊😊😊《《《《  DDDD  end "
                     else
+                        @info "😊😊😊《《《《 UUU"
                         t = binary_U_tensor
+                        @info "😊😊😊《《《《  UUUend "
                     end
                 else
                     @info "😊😊😊《《《《《《《"
                     t = unary_tensor
                 end
                 len_ = t.shape[0]
-
-                offset_tensor[pyslice(start,start + len_,nothing)] = t
+                
+                @info "t shape:"
+                @info t.shape
+                @info "start $(start)"
+                @info "len_ $(len_)"
+                if ((pyconvert(Int, start) + pyconvert(Int, len_)) <= pyconvert(Int, self.out_dim))
+                # if pyle(start + len_, self.out_dim)
+                    offset_tensor[pyslice(start,start + len_,nothing)] = t
+                else
+                    @info "pass"
+                end
                 start += len_
             end
             

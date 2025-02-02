@@ -52,6 +52,12 @@ const Add_op = Ref{Py}()
 const Mul_op = Ref{Py}()
 const Sub_op = Ref{Py}()
 const Div_op = Ref{Py}()
+const SemiSub_op = Ref{Py}()
+const SemiDiv_op = Ref{Py}()
+const Inv_op = Ref{Py}()
+const Neg_op = Ref{Py}()
+const Sin_op = Ref{Py}()
+const Cos_op = Ref{Py}()
 
 ########################### kernel ##############
 const Identity = Ref{Py}()
@@ -59,6 +65,12 @@ const Add = Ref{Py}()
 const Mul = Ref{Py}()
 const Sub = Ref{Py}()
 const Div = Ref{Py}()
+const SemiSub = Ref{Py}()
+const SemiDiv = Ref{Py}()
+const Inv = Ref{Py}()
+const Neg = Ref{Py}()
+const Sin = Ref{Py}()
+const Cos = Ref{Py}()
 
 const now_device = Ref{Py}()
 
@@ -537,6 +549,142 @@ function __init__()
         )
     ])
 
+
+    # Sin_op
+    Sin_op[] = pytype("Sin_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Sin_op[], self).__init__()
+                self.is_unary = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> sin(pyconvert(Expression,sub_expr))
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> torch[].sin(x)
+        )
+    ])
+
+    # Cos_op
+    Cos_op[] = pytype("Cos_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Cos_op[], self).__init__()
+                self.is_unary = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> cos(pyconvert(Expression,sub_expr))
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> torch[].cos(x)
+        )
+    ])
+
+    # Neg_op
+    Neg_op[] = pytype("Neg_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Neg_op[], self).__init__()
+                self.is_unary = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> sub_expr * Node(; val=Float32(-1)) # TODO error here
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> -x
+        )
+    ])
+
+    # Inv_op
+    Inv_op[] = pytype("Inv_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, threshold=1e-10)
+                pybuiltins.super(Inv_op[], self).__init__()
+                self.is_unary = true
+                self.threshold = threshold
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> 1/sub_expr
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            function (self, x)
+                return 1 / x
+            end
+        )
+    ])
+
+    # SemiDiv_op
+    SemiDiv_op[] = pytype("SemiDiv_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, threshold=1e-10)
+                pybuiltins.super(SemiDiv_op[], self).__init__()
+                self.is_unary = false
+                self.is_directed = false
+                self.threshold = threshold
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr1, sub_expr2) -> sub_expr1 / sub_expr2
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            function (self, x1, x2)
+                return x1 / x2
+            end
+        )
+    ])
+
+    # SemiSub_op
+    SemiSub_op[] = pytype("SemiSub_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(SemiSub_op[], self).__init__()
+                self.is_unary = false
+                self.is_directed = false
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr1, sub_expr2) -> sub_expr1 - sub_expr2
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x1, x2) -> x1 - x2
+        )
+    ])
+
+
 ########################################## op 👆 kernel 👇 ####################
 
     # Identity类
@@ -684,21 +832,182 @@ function __init__()
         )
     ])
 
+
+    # Neg类
+    Neg[] = pytype("Neg", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Neg[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.operator = Neg_op[]()
+                self.complexity = 1
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return -x
+            end
+        )
+    ])
+
+    # Inv类
+    Inv[] = pytype("Inv", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Inv[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.operator = Inv_op[]()
+                self.complexity = 2
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return 1 / x
+            end
+        )
+    ])
+
+    # SemiDiv类
+    SemiDiv[] = pytype("SemiDiv", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing, threshold=1e-10)
+                pybuiltins.super(SemiDiv[], self).__init__()
+                self.threshold = threshold
+                self.in_dim = in_dim
+                self.out_dim = in_dim * (in_dim + 1) ÷ 2
+                self.is_unary = pybool(false) 
+                self.is_directed = pybool(false)
+                self.complexity = 2
+                self.operator = SemiDiv_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                indices = torch[].triu_indices(
+                    self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
+                )
+                deno = x[pyslice(nothing), indices[1]]
+                num = x[pyslice(nothing), indices[0]]
+                return num / deno
+            end
+        )
+    ])
+
+    # SemiSub类
+    SemiSub[] = pytype("SemiSub", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(SemiSub[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim * (in_dim + 1) ÷ 2
+                self.is_unary = pybool(false)
+                self.is_directed = pybool(false)
+                self.complexity = 1
+                self.operator = SemiSub_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                indices = torch[].triu_indices(
+                    self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
+                )
+                out = x[pyslice(nothing), indices[0]] - x[pyslice(nothing), indices[1]]
+                return out
+            end
+        )
+    ])
+
+    # Sin类
+    Sin[] = pytype("Sin", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Sin[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.operator = Sin_op[]()
+                self.complexity = 4
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return torch[].sin(x)
+            end
+        )
+    ])
+
+    # Cos类
+    Cos[] = pytype("Cos", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Cos[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.operator = Cos_op[]()
+                self.complexity = 4
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return torch[].cos(x)
+            end
+        )
+    ])
+
     # 初始化运算符字典
     op_dict[] = Dict(
         pystr("Add") => Add_op[](),
         pystr("Mul") => Mul_op[](),
         pystr("Identity") => Identity_op[](),
-        # pystr("Sin") => Sin_op(),
-        # pystr("Cos") => Cos_op(),
+        pystr("Sin") => Sin_op[](),
+        pystr("Cos") => Cos_op[](),
         # pystr("Exp") => Exp_op(),
         # pystr("Log") => Log_op(),
-        # pystr("Neg") => Neg_op(),
-        # pystr("Inv") => Inv_op(),
+        pystr("Neg") => Neg_op[](),
+        pystr("Inv") => Inv_op[](),
         pystr("Div") => Div_op[](),
         pystr("Sub") => Sub_op[](),
-        # pystr("SemiDiv") => SemiDiv_op(),
-        # pystr("SemiSub") => SemiSub_op(),
+        pystr("SemiDiv") => SemiDiv_op[](),
+        pystr("SemiSub") => SemiSub_op[](),
         # pystr("Sign") => Sign_op(),
         # pystr("Pow2") => Pow2_op(),
         # pystr("Pow3") => Pow3_op(),
@@ -714,16 +1023,16 @@ function __init__()
         pystr("Add") => Add[],
         pystr("Mul") => Mul[],
         pystr("Identity") => Identity[],
-        # pystr("Sin") => Sin,
-        # pystr("Cos") => Cos,
+        pystr("Sin") => Sin[],
+        pystr("Cos") => Cos[],
         # pystr("Exp") => Exp,
         # pystr("Log") => Log,
-        # pystr("Neg") => Neg,
-        # pystr("Inv") => Inv,
+        pystr("Neg") => Neg[],
+        pystr("Inv") => Inv[],
         pystr("Div") => Div[],
         pystr("Sub") => Sub[],
-        # pystr("SemiDiv") => SemiDiv,
-        # pystr("SemiSub") => SemiSub,
+        pystr("SemiDiv") => SemiDiv[],
+        pystr("SemiSub") => SemiSub[],
         # pystr("Sign") => Sign,
         # pystr("Pow2") => Pow2,
         # pystr("Pow3") => Pow3,

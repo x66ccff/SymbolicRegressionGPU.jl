@@ -1,6 +1,5 @@
 module PSRNmodel
 
-using ..PSRNfunctions
 import ..CoreModule.OperatorsModule:
     plus,
     sub,
@@ -26,400 +25,638 @@ import ..CoreModule: Options, Dataset
 using Printf: @sprintf
 using DynamicExpressions: Node, Expression
 using PythonCall
+# 导入PyTorch相关模块
+# torch = @pyconst(pyimport("torch"))
 
-const torch = PythonCall.pynew()
+const torch = Ref{Py}()
+const nn = Ref{Py}()
+
+const Identity_op = Ref{Py}()
+const Add_op = Ref{Py}()
+
+const CanCountLeaveOperator = Ref{Py}()
+const DRLayer = Ref{Py}()
+const SymbolLayer = Ref{Py}()
+const PSRN = Ref{Py}()
+
+const Identity = Ref{Py}()
+const Add = Ref{Py}()
+
+
+
+# Add_op
+
+
 
 function __init__()
-    PythonCall.pycopy!(torch, pyimport("torch"))
-end
+    # 检查是否有可用的CUDA设备
+    torch[] = pyimport("torch")
+    nn[] = pyimport("torch.nn")
 
-# 首先定义基础类型
-abstract type Operator end
-
-struct UnaryOperator <: Operator
-    name::String
-    kernel::Function
-    is_directed::Bool
-    expr_gen::Function
-end
-
-struct BinaryOperator <: Operator
-    name::String
-    kernel::Function
-    is_directed::Bool
-    expr_gen::Function
-end
-
-# 然后定义操作字典
-const OPERATORS = Dict{String,Operator}(
-    "Identity" => UnaryOperator("Identity", identity_kernel!, true, identity),
-    "Sin" => UnaryOperator("Sin", sin_kernel!, true, sin),
-    "Cos" => UnaryOperator("Cos", cos_kernel!, true, cos),
-    "Exp" => UnaryOperator("Exp", exp_kernel!, true, exp),
-    "Log" => UnaryOperator("Log", log_kernel!, true, safe_log),
-    "Sqrt" => UnaryOperator("Sqrt", sqrt_kernel!, true, safe_sqrt),
-    "Add" => BinaryOperator("Add", add_kernel!, true, +),
-    "Mul" => BinaryOperator("Mul", mul_kernel!, true, *),
-    "Div" => BinaryOperator("Div", div_kernel!, true, /),
-    "Sub" => BinaryOperator("Sub", sub_kernel!, true, -),
-    "Inv" => UnaryOperator("Inv", inv_kernel!, true, x -> 1 / x),
-    "Neg" => UnaryOperator("Neg", neg_kernel!, true, x -> 0 - x),
-    "Square" => UnaryOperator("Square", square_kernel!, true, x -> square(x)),
-    "Cube" => UnaryOperator("Cube", cube_kernel!, true, x -> cube(x)),
-)
+    # 基础运算符类
+    CanCountLeaveOperator[] = pytype("CanCountLeaveOperator", (nn[].Module,), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(CanCountLeaveOperator[], self).__init__()
+                return
+            end
+        )
+    ])
 
 
-# 之后定义其他结构和函数
-mutable struct DRLayer
-    in_dim::Int
-    out_dim::Int
 
-    dr_indices::Any
-    dr_mask::Any
-    device::Int
 
-    function DRLayer(in_dim::Int, dr_mask::Vector{Bool}, device::Int)
-        # out_dim = sum(dr_mask)
-        # arange_tensor = collect(0:(length(dr_mask) - 1))
 
-        # dr_indices = to(dr_indices, CUDA(device))
-        # dr_mask_tensor = to(dr_mask_tensor, CUDA(device))
-        return new(in_dim, out_dim, 1, 1, device)
-    end
-end
-
-function get_op_and_offset(layer::DRLayer, index::Int)
-    return Int(Array(layer.dr_indices)[index + 1])
-end
-
-# SymbolLayer implementation
-mutable struct SymbolLayer
-    in_dim::Int
-    out_dim::Int
-    operators::Vector{Operator}
-    n_binary_U::Int  # undirected (+ *)
-    n_binary_D::Int  # directed (/ -)
-    n_unary::Int
-    operator_list::Vector{Operator}
-    n_triu::Int
-    in_dim_square::Int
-    out_dim_cum_ls::Union{Vector{Int},Nothing}
-    offset_tensor::Union{AbstractArray,Nothing}
-    device::Int
-
-    function SymbolLayer(in_dim::Int, operator_names::Vector{String}, device::Int)
-        n_binary_U = 0
-        n_binary_D = 0
-        n_unary = 0
-        operator_list = Operator[]
-        operators = [OPERATORS[name] for name in operator_names]
-
-        n_triu = (in_dim * (in_dim + 1)) ÷ 2
-        in_dim_square = in_dim * in_dim
-
-        # Count operators
-        for op in operators
-            if op isa BinaryOperator
-                if op.is_directed
-                    n_binary_D += 1
+    # Duplicate Removal Layer
+    DRLayer[] = pytype("DRLayer", (nn[].Module,), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            # 同样添加kwargs参数
+            function (self, in_dim, dr_mask=nothing; device=nothing)
+                pybuiltins.super(DRLayer[], self).__init__()
+                
+                self.in_dim = in_dim
+                self.dr_mask = dr_mask
+                self.device = device
+                
+                if !pyis(dr_mask, pybuiltins.None)
+                    self.out_dim = pyconvert(Int, dr_mask.sum())
                 else
-                    n_binary_U += 1
+                    self.out_dim = pyconvert(Int, in_dim)
                 end
-            else
-                n_unary += 1
+                
+                return
             end
-        end
-
-        # Add operators in order
-        # 1. Undirected binary operators
-        for op in operators
-            if op isa BinaryOperator && !op.is_directed
-                push!(operator_list, op)
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return x[:, self.dr_mask]
             end
-        end
-
-        # 2. Directed binary operators
-        for op in operators
-            if op isa BinaryOperator && op.is_directed
-                push!(operator_list, op)
+        ),
+        pyfunc(
+            name = "get_op_and_offset",
+            function (self, index)
+                return self.dr_indices[index].item()
             end
-        end
-
-        # 3. Unary operators
-        for op in operators
-            if op isa UnaryOperator
-                push!(operator_list, op)
-            end
-        end
-
-        out_dim = n_unary * in_dim + n_binary_U * n_triu + n_binary_D * in_dim_square
-
-        layer = new(
-            in_dim,
-            out_dim,
-            operators,
-            n_binary_U,
-            n_binary_D,
-            n_unary,
-            operator_list,
-            n_triu,
-            in_dim_square,
-            nothing,
-            nothing,
-            device,
         )
+    ])
 
-        init_offset(layer)
-        return layer
-    end
-end
+    # Symbol Layer
+    SymbolLayer[] = pytype("SymbolLayer", (nn[].Module,), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            # 这里添加kwargs参数来处理关键字参数
+            function (self, in_dim, operators=["Add", "Mul", "Identity", "Sin", "Exp", "Neg", "Inv"]; device=nothing)
+                pybuiltins.super(SymbolLayer[], self).__init__()
+                
+                self.in_dim = in_dim
+                self.operators = operators
+                self.device = device
 
-function get_out_dim_cum_ls(layer::SymbolLayer)
-    if layer.out_dim_cum_ls !== nothing
-        return layer.out_dim_cum_ls
-    end
+                self.n_triu = pyfloordiv(in_dim * (in_dim + 1), 2)
+                self.in_dim_square = in_dim * in_dim
 
-    out_dim_ls = Int[]
-    for func in layer.operator_list
-        if func isa UnaryOperator
-            push!(out_dim_ls, layer.in_dim)
-        else
-            if func.is_directed
-                push!(out_dim_ls, layer.in_dim_square)
-            else
-                push!(out_dim_ls, layer.n_triu)
+                self.out_dim_cum_ls = Py(nothing)
+                self.list = pylist([])
+                self.offset_tensor = Py(nothing)
+                
+                for op_str in operators
+                    self.list.append(kernel_dict[op_str](in_dim))
+                end
+
+                # 计算输出维度
+                self.out_dim = 0
+                for op_str in operators
+                    op = op_dict[op_str]
+                    if pyconvert(Bool, op.is_unary)
+                        res = pyconvert(Int, in_dim)
+                    else
+                        res = pyconvert(Bool, op.is_directed) ? 
+                            pyconvert(Int, in_dim)^2 : 
+                            pyconvert(Int, in_dim) * (pyconvert(Int, in_dim) + 1) ÷ 2
+                    end
+                    @info "加了 $res ，因为 $op"
+                    self.out_dim += res
+                end
+
+                @assert pylen(operators) == pylen(self.list)
+
+                @info "计算的🎇🎇🎇🎇 self.out_dim"
+                @info self.out_dim
+                
+                @info "开始init offset"
+                self.init_offset()
+
+                return
             end
-        end
-    end
-
-    layer.out_dim_cum_ls = [sum(out_dim_ls[1:i]) for i in 1:length(out_dim_ls)]
-    return layer.out_dim_cum_ls
-end
-
-function get_offset_tensor(layer::SymbolLayer)
-    offset_tensor = zeros(Int, layer.out_dim, 2)
-    arange_tensor = collect(0:(layer.in_dim - 1))
-
-    binary_U_tensor = zeros(Int, layer.n_triu, 2)
-    binary_D_tensor = zeros(Int, layer.in_dim_square, 2)
-    unary_tensor = zeros(Int, layer.in_dim, 2)
-
-    unary_tensor[:, 1] = arange_tensor
-    unary_tensor[:, 2] .= layer.in_dim
-
-    # Fill binary_U_tensor (index of undirected binary operation)
-    start = 1
-    for i in 0:(layer.in_dim - 1)
-        len = layer.in_dim - i
-        binary_U_tensor[start:(start + len - 1), 1] .= i
-        binary_U_tensor[start:(start + len - 1), 2] = i:(layer.in_dim - 1)
-        start += len
-    end
-
-    # Fill binary_D_tensor (index of directed binary operation)
-    start = 1
-    for i in 0:(layer.in_dim - 1)
-        len = layer.in_dim
-        binary_D_tensor[start:(start + len - 1), 1] .= i
-        binary_D_tensor[start:(start + len - 1), 2] = 0:(layer.in_dim - 1)
-        start += len
-    end
-
-    # Combine all indexes
-    start = 1
-    for func in layer.operator_list
-        if func isa UnaryOperator
-            t = unary_tensor
-        else
-            t = func.is_directed ? binary_D_tensor : binary_U_tensor
-        end
-        len = size(t, 1)
-        offset_tensor[start:(start + len - 1), :] = t
-        start += len
-    end
-
-    return offset_tensor
-end
-
-function init_offset(layer::SymbolLayer)
-    return layer.offset_tensor = get_offset_tensor(layer)
-end
-
-function get_op_and_offset(layer::SymbolLayer, index::Int)
-    out_dim_cum_ls = get_out_dim_cum_ls(layer)
-    op_idx = 1
-    for i in eachindex(out_dim_cum_ls)
-        if index < out_dim_cum_ls[i]
-            op_idx = i
-            break
-        end
-    end
-    offset = layer.offset_tensor[index + 1, :]
-    return layer.operator_list[op_idx], offset
-end
-
-
-# PSRN implementation
-mutable struct PSRN
-    n_variables::Int
-    operators::Vector{String}
-    n_symbol_layers::Int
-    layers::Vector{Union{SymbolLayer,DRLayer}}
-    out_dim::Int
-    use_dr_mask::Bool
-    current_expr_ls::Vector{Expression}
-    device::Int
-    options::Options
-
-    function PSRN(;
-        n_variables::Int=1,
-        operators::Vector{String}=["Add", "Mul", "Identity", "Sin", "Exp", "Neg"],
-        n_symbol_layers::Int=3,
-        dr_mask::Union{Vector{Bool},Nothing}=nothing,
-        device::Int=0,
-        options::Options=Options(),
-    )
-        layers = Union{SymbolLayer,DRLayer}[]
-        use_dr_mask = !isnothing(dr_mask)
-
-        for i in 1:n_symbol_layers
-            if use_dr_mask && i == n_symbol_layers
-                push!(layers, DRLayer(layers[end].out_dim, dr_mask, device))
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                h = pylist([])
+                for i in 1:pylen(self.list)
+                    md = self.list[pyindex(i-1)]
+                    res = md(x)
+                    h.append(res)
+                end
+                @info "h ============"
+                h = torch[].cat(h, dim=1)
+                return h
             end
-
-            if i == 1
-                push!(layers, SymbolLayer(n_variables, operators, device))
-            else
-                push!(layers, SymbolLayer(layers[end].out_dim, operators, device))
+        ),
+        pyfunc(
+            name = "init_offset",
+            function (self)
+                self.offset_tensor = self.get_offset_tensor()
             end
-        end
+        ),
+        pyfunc(
+            name = "get_offset_tensor",
+            function (self)
+                device = self.device
+                offset_tensor = torch[].zeros((self.out_dim, 2), dtype=torch[].int, device=device)
+                arange_tensor = torch[].arange(self.in_dim, dtype=torch[].int, device=device)
+                
+                binary_U_tensor = torch[].zeros((self.n_triu, 2), dtype=torch[].int, device=device)
+                binary_D_tensor = torch[].zeros((self.in_dim_square, 2), dtype=torch[].int, device=device)
+                unary_tensor = torch[].zeros((self.in_dim, 2), dtype=torch[].int, device=device)
+                
+                unary_tensor[pyslice(nothing), 0] = arange_tensor
+                unary_tensor[pyslice(nothing), 1] = self.in_dim
 
-        return new(
-            n_variables,
-            operators,
-            n_symbol_layers,
-            layers,
-            layers[end].out_dim,
-            use_dr_mask,
-            [],
-            device,
-            options,
+                start = 0
+                for i in 0:pyconvert(Int, self.in_dim) - 1
+                    
+                    len_ = self.in_dim - i
+                    
+                    binary_U_tensor[pyslice(start , start + len_), 0] = pyint(i)
+                    
+                    binary_U_tensor[pyslice(start , start + len_), 1] = arange_tensor[pyslice(i,nothing)]
+                    
+                    start += len_
+                end
+                
+                start = 0
+                for i in 0:pyconvert(Int, self.in_dim) - 1
+                    len_ = self.in_dim
+                    binary_D_tensor[pyslice(start , start + len_), 0] = pyint(i)
+                    binary_D_tensor[pyslice(start , start + len_), 1] = arange_tensor[pyslice(0,nothing)]
+                    start += len_    
+                end
+
+                start = 0
+                for func in self.list
+                    if !pyconvert(Bool, func.is_unary)
+                        if pyconvert(Bool,func.is_directed)
+                            t = binary_D_tensor
+                        else
+                            t = binary_U_tensor
+
+                        end
+                    else
+                        t = unary_tensor
+                    end
+                    len_ = t.shape[0]
+                    
+                    if ((pyconvert(Int, start) + pyconvert(Int, len_)) <= pyconvert(Int, self.out_dim))
+                    # if pyle(start + len_, self.out_dim)
+                        offset_tensor[pyslice(start,start + len_,nothing)] = t
+                    else
+                        @info "pass"
+                    end
+                    start += len_
+                end
+                
+                return offset_tensor
+            end
+        ),
+        pyfunc(
+            name = "get_out_dim_cum_ls",
+            function (self)
+                if !pyconvert(Bool, pyis(self.out_dim_cum_ls, Py(nothing)))
+                    return self.out_dim_cum_ls
+                end
+                
+                out_dim_ls = pylist([])
+                for func in self.list
+                    if !pyconvert(Bool, func.is_unary)
+                        if pyconvert(Bool, func.is_directed)
+                            out_dim_ls.append(self.in_dim_square)
+                        else
+                            out_dim_ls.append(self.n_triu)
+                        end
+                    else
+                        out_dim_ls.append(self.in_dim)
+                    end
+                end
+                self.out_dim_cum_ls = [sum(out_dim_ls[pyslice(nothing,i+1)]) for i in 0:length(out_dim_ls)-1]
+                @info "self.out_dim_cum_ls"
+                @info self.out_dim_cum_ls
+                return self.out_dim_cum_ls
+            end
+        ),
+        pyfunc(
+            name = "get_op_and_offset",
+            function (self, index)
+                out_dim_cum_ls = self.get_out_dim_cum_ls()
+                i = 0
+                for (idx, val) in enumerate(out_dim_cum_ls)
+                    if pyconvert(Bool, pylt(index,val))
+                        i = idx - 1
+                        break
+                    end
+                end
+                func = self.list[i]
+                offset = self.offset_tensor[index].tolist()
+                return func.operator, offset
+            end
         )
-    end
-end
+    ])
 
+    # PSRN类
+    PSRN[] = pytype("PSRN", (nn[].Module,), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, n_variables=1, 
+                    operators=["Add", "Mul", "Identity", "Sin", "Exp", "Neg", "Inv"],
+                    n_symbol_layers=3,
+                    dr_mask=pybuiltins.None,
+                    device="cuda")
+                pybuiltins.super(PSRN[], self).__init__()
+                
+                # 设置设备
+                if pyconvert(Bool, pyisinstance(device, pybuiltins.str))
+                    if pyconvert(Bool, pyeq(device, "cuda"))
+                        self.device = torch[].device("cuda")
+                    elseif pyconvert(Bool, pyeq(device, "cpu"))
+                        self.device = torch[].device("cpu")
+                    else
+                        error("device must be cuda or cpu, got $(device)")
+                    end
+                else
+                    self.device = device
+                end
+                
+                self.n_variables = n_variables
+                self.operators = operators
+                self.n_symbol_layers = n_symbol_layers
+                
+                self.list = nn[].ModuleList()
+                
+                # 处理dr_mask
+                if pyconvert(Bool, pyis(dr_mask, pybuiltins.None))
+                    self.use_dr_mask = pybool(false)
+                else
+                    self.use_dr_mask = pybool(true)
+                    if !pyconvert(Bool, pyisinstance(dr_mask, torch[].Tensor))
+                        error("dr_mask must be a tensor")
+                    end
+                    if !pyconvert(Bool, pyeq(dr_mask.dim(), Py(1)))
+                        error("dr_mask should be 1-dim, got $(dr_mask.dim())")
+                    end
+                    dr_mask = dr_mask.to(self.device)
+                end
+                
+                # 构建层
+                @info "构建层"
+                for i in 1:pyconvert(Int, n_symbol_layers)
+                    @info "构建第 $i 层"
+                    if pyconvert(Bool, pygt(pylen(self.list), 0)) && pyconvert(Bool, self.use_dr_mask) && pyconvert(Bool, pyeq(i, n_symbol_layers))
+                        last_layer = self.list[pylen(self.list) - 1]  # Python的索引从0开始
+                        self.list.append(
+                            DRLayer[](last_layer.out_dim, dr_mask=dr_mask, device=self.device)
+                        )
+                    end
+                    
+                    if pyconvert(Bool, pyeq(i, 1))
+                        self.list.append(
+                            SymbolLayer[](n_variables, operators, device=self.device)
+                        )
+                    else
+                        last_layer = self.list[pylen(self.list) - 1]  # 获取最后一层
+                        self.list.append(
+                            SymbolLayer[](last_layer.out_dim, operators, device=self.device)
+                        )
+                    end
+                    @info "长度 $(pylen(self.list))"
+                end
+                
+                self.current_expr_ls = []
+                last_layer = self.list[pylen(self.list) - 1]  # 获取最后一层
+                self.out_dim = last_layer.out_dim
 
-
-
-function get_best_expr_and_MSE_topk(  # TODO JIJIJI
-    model::PSRN,
-    # X::Matrix{Float16,2},
-    X::Any,
-    Y::Vector{Float16},
-    n_top::Int,
-    device_id::Int,
-)
-
-    batch_size = size(X, 1)
-    Y = Float16.(Y)
-
-    @info "typeof X,Y"
-    @info typeof(X)
-    @info typeof(Y)
-
-    # sum_squared_errors = (zeros(Float16, (1, model.out_dim))) # for saving memory
-
-    # sum_squared_errors = to(sum_squared_errors, CUDA(device_id))
-
-    # for i in 1:batch_size
-    #     x_sliced = X[i:i, :]
-
-    #     x_sliced = to(x_sliced, CUDA(device_id))
-
-    #     H = PSRN_forward(model, x_sliced) #   0.150774 seconds
-
-    #     diff = H .- Y[i]
-
-    #     square = diff * diff # don't use ^2, because it will get Float64
-
-    #     sum_squared_errors += square
-    # end
-
-    # mean_errors = sum_squared_errors ./ batch_size
-
-    # indices = topk_indices(mean_errors, n_top) + 1 # add 1 because the index is 0-based
-
-    # indices = Array(to(indices, CPU()))
-
-    expr_best_ls = Expression[]
-
-    # for i in indices
-    #     push!(expr_best_ls, get_expr(model, i))
-    # end
-
-    return expr_best_ls
-end
-
-function get_expr(model::PSRN, index::Int)
-    return _get_expr(model, index, length(model.layers))
-end
-
-function _get_expr(model::PSRN, index::Int, layer_idx::Int)
-    # @info "\t\tGetting expression for index $index, layer_idx $layer_idx"
-    if layer_idx < 1
-        return model.current_expr_ls[index + 1]
-        # try
-        #     return model.current_expr_ls[index + 1]
-        # catch e
-        #     if isa(e, BoundsError)
-        #         @error "BoundsError: length of model.current_expr_ls is $(length(model.current_expr_ls)), however got index $index"
-        #         throw(e)
-        #     end
-        # end
-    end
-
-    layer = model.layers[layer_idx]
-
-    if layer isa DRLayer
-        new_index = get_op_and_offset(layer, index)
-        return _get_expr(model, new_index, layer_idx - 1)
-    else
-        op, offsets = get_op_and_offset(layer, index)
-        if op isa UnaryOperator
-            expr1 = _get_expr(model, offsets[1], layer_idx - 1)
-            if op.name == "Identity"
-                return expr1
+                @info "self.out_dim = $(self.out_dim)"
+                
+                return
             end
-            return op.expr_gen(expr1)
-        else
-            expr1 = _get_expr(model, offsets[1], layer_idx - 1)
-            expr2 = _get_expr(model, offsets[2], layer_idx - 1)
-            return op.expr_gen(expr1, expr2)
-        end
-    end
-end
+        ),
+        pyfunc(
+            name = "__repr__",
+            function (self)
+                base_repr = pybuiltins.super(PSRN[], self).__repr__()
+                info = "n_inputs: $(self.n_variables), operators: $(self.operators), n_layers: $(self.n_symbol_layers)"
+                dims = join([string(layer.out_dim) for layer in self.list], "\n")
+                return base_repr * "\n" * info * "\n dim:\n" * dims
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                # shape x: (batch_size, n_variables)
+                @info "👉forward start"
+                h = x
+                for layer in self.list
+                @info "👉forward $layer"
+                    h = layer(h)
+                end
+                return h  # shape: (batch_size, out_dim)
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            function (self, index)
+                return self._get_expr(index, -1)
+            end
+        ),
+        pyfunc(
+            name = "_get_expr",
+            function (self, index, layer_idx)
+                if pyconvert(Bool, pylt(pylen(self.list) + layer_idx, 0))
+                    return self.current_expr_ls[index]
+                end
+                
+                layer = self.list[layer_idx]
+                
+                if layer._get_name() == "DRLayer"
+                    new_index = layer.get_op_and_offset(index)
+                    return self._get_expr(new_index, layer_idx - 1)
+                else
+                    # SymbolLayer
+                    func_op, offset = layer.get_op_and_offset(index)
+                    # @info "func_op, offset <======== index"
+                    # @info "$func_op, $offset <======== $index"
+                    if pyconvert(Bool, func_op.is_unary)
+                        return func_op.get_expr(
+                            self._get_expr(offset[0], layer_idx - 1))
+                    else
+                        return func_op.get_expr(
+                            self._get_expr(offset[0], layer_idx - 1),
+                            self._get_expr(offset[1], layer_idx - 1)
+                        )
+                    end
+                end
+            end
+        )
+    ])
 
-function Base.show(io::IO, model::PSRN)
-    print(
-        io,
-        "PSRN(n_variables=$(model.n_variables), operators=$(model.operators), " *
-        "n_layers=$(model.n_symbol_layers))\n",
+    Add_op[] = pytype("Add_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Add_op[], self).__init__()
+                self.is_unary = false
+                self.is_directed = false
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr1, sub_expr2) -> sub_expr1 + sub_expr2
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x1, x2) -> x1 + x2
+        )
+    ])
+    
+    @info Add_op[]()
+
+
+    Identity_op[] = pytype("Identity_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Identity_op[], self).__init__()
+                self.is_unary = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> sub_expr
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> x
+        )
+    ])
+
+
+
+
+    # Identity类
+    Identity[] = pytype("Identity", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Identity[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.operator = Identity_op[]()
+                self.complexity = 0
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x, second_device=pybuiltins.None)
+                if !pyis(second_device, pybuiltins.None)
+                    x = x.to(second_device)
+                end
+                return x
+            end
+        )
+    ])
+
+
+    # Add类
+    Add[] = pytype("Add", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Add[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim * (in_dim + 1) ÷ 2
+                self.is_unary = pybool(false)
+                self.is_directed = pybool(false)
+                self.complexity = 1
+                self.operator = Add_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                indices = torch[].triu_indices(
+                    self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
+                )
+                out = x[pyslice(0,2), indices[0]] + x[pyslice(0,2), indices[1]]
+                return out
+            end
+        )
+    ])
+
+    # 初始化运算符字典
+    op_dict = Dict(
+        pystr("Add") => Add_op[](),
+        # pystr("Mul") => Mul_op(),
+        pystr("Identity") => Identity_op[](),
+        # pystr("Sin") => Sin_op(),
+        # pystr("Cos") => Cos_op(),
+        # pystr("Exp") => Exp_op(),
+        # pystr("Log") => Log_op(),
+        # pystr("Neg") => Neg_op(),
+        # pystr("Inv") => Inv_op(),
+        # pystr("Div") => Div_op(),
+        # pystr("Sub") => Sub_op(),
+        # pystr("SemiDiv") => SemiDiv_op(),
+        # pystr("SemiSub") => SemiSub_op(),
+        # pystr("Sign") => Sign_op(),
+        # pystr("Pow2") => Pow2_op(),
+        # pystr("Pow3") => Pow3_op(),
+        # pystr("Pow") => Pow_op(),
+        # pystr("Sigmoid") => Sigmoid_op(),
+        # pystr("Abs") => Abs_op(),
+        # pystr("Cosh") => Cosh_op(),
+        # pystr("Tanh") => Tanh_op(),
+        # pystr("Sqrt") => Sqrt_op()
     )
-    print(io, "Layer dimensions: ")
-    return print(io, join([layer.out_dim for layer in model.layers], " → "))
+
+    kernel_dict = Dict(
+        pystr("Add") => Add[],
+        # pystr("Mul") => Mul,
+        pystr("Identity") => Identity[],
+        # pystr("Sin") => Sin,
+        # pystr("Cos") => Cos,
+        # pystr("Exp") => Exp,
+        # pystr("Log") => Log,
+        # pystr("Neg") => Neg,
+        # pystr("Inv") => Inv,
+        # pystr("Div") => Div,
+        # pystr("Sub") => Sub,
+        # pystr("SemiDiv") => SemiDiv,
+        # pystr("SemiSub") => SemiSub,
+        # pystr("Sign") => Sign,
+        # pystr("Pow2") => Pow2,
+        # pystr("Pow3") => Pow3,
+        # pystr("Pow") => Pow,
+        # pystr("Sigmoid") => Sigmoid,
+        # pystr("Abs") => Abs,
+        # pystr("Cosh") => Cosh,
+        # pystr("Tanh") => Tanh,
+        # pystr("Sqrt") => Sqrt
+    )
+
+
+    is_cuda_available = pyconvert(Bool, torch[].cuda.is_available())
+    if is_cuda_available
+        @info "Yes 😀"
+    else 
+        @info "No 😭"
+    end
+    device = torch[].device(is_cuda_available ? "cuda" : "cpu")
+    # # device = torch_device(is_cuda_available ? "cpu" : "cpu")
+    println("Using device: ", device)
+
+    n_variables = 3
+    n_symbol_layers = 3
+
+    # n_variables = 1
+    # n_symbol_layers = 1
+    # @info pybuiltins.None
+    @info pybuiltins.None
+
+    
+    # 创建一些随机输入数据
+    x = torch[].randn((1, n_variables), device=device)
+    println("\nInput shape: ", x.shape)
+    println("Input data:\n", x)
+
+    # test Add()
+    myadd = Add[](Py(n_variables))
+    println("\nAdd(): ", myadd)
+    res = myadd(x)
+    @info myadd(x).shape
+    @info "👆"
+
+    # # 创建PSRN模型
+    model = PSRN[](
+        Py(n_variables),  # n_variables
+        # Py(["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin","Exp","Log"]),  # operators cos, inv bug todo
+        Py(["Add", "Identity"]),  # operators
+        Py(n_symbol_layers),  # n_symbol_layers
+        pybuiltins.None,  # dr_mask
+        device  # device
+    )
+    
+    # 将模型移到指定设备
+    model = model.to(device)
+
+
+    
+    # 前向传播
+    output = model(x)
+    println("\nOutput shape: ", output.shape)
+    @info "output.shape"
+    @info output.shape
+    
+    
+
+    # 设置运算符选项
+    options = Options(;
+        binary_operators=[+, -, *, /],
+        unary_operators=[cos, exp, sin, log]
+    )
+    operators = options.operators
+    
+    # 创建变量名列表
+    variable_names = ["x$i" for i in 0:n_variables-1]
+    
+    # 创建表达式列表
+    model.current_expr_ls = [Expression(Node(Float64; feature=i); operators, variable_names) 
+                            for i in 1:n_variables]
+    # 创建符号变量
+    # vars = [SymbolicUtils.Sym{Real}(Symbol("x$i")) for i in 0:n_variables-1]
+    # vars = [Node(Float64; feature=i) for i in 0:n_variables-1]
+    # model.current_expr_ls = vars
+
+    @info model.current_expr_ls
+
+    # 获取一些表达式示例
+    println("\nSome expression examples:")
+    for i in 0:min(1000,pyconvert(Int,output.shape[1]))-1
+        expr = model.get_expr(i)
+        println("Expression $i: ", expr)
+    end
+    
+    # return model, x, output
 end
 
-
-# Export types and functions
-export PSRN,
-    SymbolLayer,
-    DRLayer,
-    Operator,
-    UnaryOperator,
-    BinaryOperator,
-    get_best_expr_and_MSE_topk,
-    get_expr,
-    get_op_and_offset
+export PSRN
 
 
 end

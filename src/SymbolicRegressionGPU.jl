@@ -224,7 +224,6 @@ using DispatchDoctor: @stable
     include("ComposableExpression.jl")
     include("TemplateExpression.jl")
     include("ParametricExpression.jl")
-    include("PSRNfunctions.jl")
     include("PSRNmodel.jl")
 end
 
@@ -329,8 +328,7 @@ using .TemplateExpressionModule: TemplateExpression, TemplateStructure, ValidVec
 using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
-import .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk
-
+import .PSRNmodel: PSRN
 
 @stable default_mode = "disable" begin
     include("deprecates.jl")
@@ -804,7 +802,7 @@ mutable struct PSRNManager
     current_task::Union{Task,Nothing}
     call_count::Int
     N_PSRN_INPUT::Int
-    net::PSRN
+    net::Any
     max_samples::Int
 
     function PSRNManager(;
@@ -814,14 +812,15 @@ mutable struct PSRNManager
         options::Options,
         max_samples::Int=100, # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
     )
-        psrn = PSRN(;
-            n_variables=N_PSRN_INPUT,
-            operators=operators,
-            n_symbol_layers=n_symbol_layers,
-            dr_mask=nothing,
-            device=0,
-            options=options,
-        )
+        # psrn = PSRN(;
+        #     n_variables=N_PSRN_INPUT,
+        #     operators=operators,
+        #     n_symbol_layers=n_symbol_layers,
+        #     dr_mask=nothing,
+        #     device=0,
+        #     options=options,
+        # )
+        psrn = 1
 
         return new(
             Channel{Vector{Expression}}(32), nothing, 0, N_PSRN_INPUT, psrn, max_samples
@@ -1128,19 +1127,19 @@ function start_psrn_task(
             # @info "best_expressions: $best_expressions"
         catch e
             bt = stacktrace(catch_backtrace())
-            # @error """
-            # PSRN task execution error:
-            # Error type: $(typeof(e))
-            # Error message: $e
-            # Error location: $(bt[1])
-            # Full stack:
-            # $(join(string.(bt), "\n"))
-            # """
             @error """
             PSRN task execution error:
             Error type: $(typeof(e))
+            Error message: $e
             Error location: $(bt[1])
+            Full stack:
+            $(join(string.(bt), "\n"))
             """
+            # @error """
+            # PSRN task execution error:
+            # Error type: $(typeof(e))
+            # Error location: $(bt[1])
+            # """
         end
     end
 end

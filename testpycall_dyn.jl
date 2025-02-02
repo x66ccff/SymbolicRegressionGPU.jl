@@ -1564,10 +1564,10 @@ PSRN = pytype("PSRN", (nn.Module,), [
         name = "forward",
         function (self, x)
             # shape x: (batch_size, n_variables)
-            @info "👉forward start"
+            # @info "👉forward start"
             h = x
             for layer in self.list
-            @info "👉forward $layer"
+            # @info "👉forward $layer"
                 h = layer(h)
             end
             return h  # shape: (batch_size, out_dim)

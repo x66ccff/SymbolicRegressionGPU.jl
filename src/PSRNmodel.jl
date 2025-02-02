@@ -45,11 +45,20 @@ const PSRN = Ref{Py}()
 const op_dict = Ref{Dict}()
 const kernel_dict = Ref{Dict}()
 
+
+########################## op #####################
 const Identity_op = Ref{Py}()
 const Add_op = Ref{Py}()
+const Mul_op = Ref{Py}()
+const Sub_op = Ref{Py}()
+const Div_op = Ref{Py}()
 
+########################### kernel ##############
 const Identity = Ref{Py}()
 const Add = Ref{Py}()
+const Mul = Ref{Py}()
+const Sub = Ref{Py}()
+const Div = Ref{Py}()
 
 const now_device = Ref{Py}()
 
@@ -167,13 +176,9 @@ function __init__()
                 for i in 1:pylen(self.list)
                     md = self.list[pyindex(i-1)]
                     res = md(x)
-                    @info "md"
-                    @info md
-                    @info "res.shape"
-                    @info res.shape
                     h.append(res)
                 end
-                @info "h ============"
+                # @info "h ============"
                 h = torch[].cat(h, dim=1)
                 return h
             end
@@ -378,10 +383,10 @@ function __init__()
             name = "forward",
             function (self, x)
                 # shape x: (batch_size, n_variables)
-                @info "👉forward start"
+                # @info "👉forward start"
                 h = x
                 for layer in self.list
-                @info "👉forward $layer"
+                # @info "👉forward $layer"
                     h = layer(h)
                 end
                 return h  # shape: (batch_size, out_dim)
@@ -465,6 +470,75 @@ function __init__()
         )
     ])
 
+    Mul_op[] = pytype("Mul_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Mul_op[], self).__init__()
+                self.is_unary = false
+                self.is_directed = false
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr1, sub_expr2) -> sub_expr1 * sub_expr2
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x1, x2) -> x1 * x2
+        )
+    ])
+    
+    Div_op[] = pytype("Div_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, threshold=1e-10)
+                pybuiltins.super(Div_op[], self).__init__()
+                self.is_unary = false
+                self.is_directed = true
+                self.threshold = threshold
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr1, sub_expr2) -> sub_expr1 / sub_expr2
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            function (self, x1, x2)
+                return x1 / x2
+            end
+        )
+    ])
+    
+    # Sub_op
+    Sub_op[] = pytype("Sub_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Sub_op[], self).__init__()
+                self.is_unary = false
+                self.is_directed = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr1, sub_expr2) -> sub_expr1 - sub_expr2
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x1, x2) -> x1 - x2
+        )
+    ])
+
+########################################## op 👆 kernel 👇 ####################
+
     # Identity类
     Identity[] = pytype("Identity", (CanCountLeaveOperator[],), [
         "__module__" => "__main__",
@@ -523,10 +597,97 @@ function __init__()
         )
     ])
 
+    Mul[] = pytype("Mul", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Mul[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim * (in_dim + 1) ÷ 2
+                self.is_unary = pybool(false)
+                self.is_directed = pybool(false)
+                self.complexity = 1
+                self.operator = Mul_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                indices = torch[].triu_indices(
+                    self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
+                )
+                out = x[pyslice(nothing), indices[0]] * x[pyslice(nothing), indices[1]]
+                return out
+            end
+        )
+    ])
+
+
+
+    # Sub类
+    Sub[] = pytype("Sub", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Sub[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim * in_dim
+                self.is_unary = pybool(false)
+                self.is_directed = pybool(true)
+                self.complexity = 1
+                self.operator = Sub_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                num = x.view(1, -1, 1)
+                deno = x.view(1, 1, -1)
+                out = (num - deno).view(1, -1)
+                return out
+            end
+        )
+    ])
+
+
+    # Div
+    Div[] = pytype("Div", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Div[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim * in_dim
+                self.is_unary = pybool(false)
+                self.is_directed = pybool(true)
+                self.complexity = 1
+                self.operator = Div_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                num = x.view(1, -1, 1)
+                deno = x.view(1, 1, -1)
+                out = (num / deno).view(1, -1)
+                return out
+            end
+        )
+    ])
+
     # 初始化运算符字典
     op_dict[] = Dict(
         pystr("Add") => Add_op[](),
-        # pystr("Mul") => Mul_op(),
+        pystr("Mul") => Mul_op[](),
         pystr("Identity") => Identity_op[](),
         # pystr("Sin") => Sin_op(),
         # pystr("Cos") => Cos_op(),
@@ -534,8 +695,8 @@ function __init__()
         # pystr("Log") => Log_op(),
         # pystr("Neg") => Neg_op(),
         # pystr("Inv") => Inv_op(),
-        # pystr("Div") => Div_op(),
-        # pystr("Sub") => Sub_op(),
+        pystr("Div") => Div_op[](),
+        pystr("Sub") => Sub_op[](),
         # pystr("SemiDiv") => SemiDiv_op(),
         # pystr("SemiSub") => SemiSub_op(),
         # pystr("Sign") => Sign_op(),
@@ -551,7 +712,7 @@ function __init__()
 
     kernel_dict[] = Dict(
         pystr("Add") => Add[],
-        # pystr("Mul") => Mul,
+        pystr("Mul") => Mul[],
         pystr("Identity") => Identity[],
         # pystr("Sin") => Sin,
         # pystr("Cos") => Cos,
@@ -559,8 +720,8 @@ function __init__()
         # pystr("Log") => Log,
         # pystr("Neg") => Neg,
         # pystr("Inv") => Inv,
-        # pystr("Div") => Div,
-        # pystr("Sub") => Sub,
+        pystr("Div") => Div[],
+        pystr("Sub") => Sub[],
         # pystr("SemiDiv") => SemiDiv,
         # pystr("SemiSub") => SemiSub,
         # pystr("Sign") => Sign,

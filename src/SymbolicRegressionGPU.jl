@@ -1089,7 +1089,7 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             @info "sleep.."
-            sleep(1)
+            # sleep(1)
             @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
@@ -1317,10 +1317,10 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 2
-        n_symbol_layers = 1
+        N_PSRN_INPUT = 3
+        n_symbol_layers = 3
         max_samples = 20
-        operators = ["Add", "Identity"]
+        operators = ["Add", "Mul", "Sub", "Div", "Identity"]
 
         initialize!(
             psrn_manager,

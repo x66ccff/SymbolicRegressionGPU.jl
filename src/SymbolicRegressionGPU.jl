@@ -1089,7 +1089,7 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             # @info "sleep.."
-            # sleep(1)
+            sleep(0.5)
             # @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
@@ -1186,8 +1186,10 @@ function start_psrn_task(
             #     manager.net, X_mapped_sampled, y_sampled, 100, device_id
             # )
 
+            X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.half()
+            y_sampled_pytorch = y_sampled_pytorch.half()
 
-            sum_ = torch[].zeros((1, manager.net.out_dim), device=manager.net.device)
+            sum_ = torch[].zeros((1, manager.net.out_dim), device=manager.net.device, dtype=y_sampled_pytorch.dtype)
             # for i in range(X.shape[0]):
             for i in 0:row-1
                 H = manager.net.forward(X_mapped_sampled_pytorch[i].reshape(1, -1))
@@ -1237,7 +1239,7 @@ function start_psrn_task(
             # @info "👉👉👉👉👉👉👉"
 
             put!(manager.channel, best_expressions)
-
+            PythonCall.GC.gc()
         catch e
             bt = stacktrace(catch_backtrace())
             @error """
@@ -1320,8 +1322,8 @@ function _main_search_loop!(
 
         N_PSRN_INPUT = 20
         n_symbol_layers = 2
-        max_samples = 20
-        operators = ["Add", "Mul", "SemiSub", "SemiDiv", "Identity", "Neg", "Inv"]
+        max_samples = 100
+        operators = ["Add", "Mul", "SemiSub","SemiDiv","Identity"]
 
         initialize!(
             psrn_manager,

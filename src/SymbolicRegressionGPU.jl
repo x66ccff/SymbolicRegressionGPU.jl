@@ -328,7 +328,8 @@ using .TemplateExpressionModule: TemplateExpression, TemplateStructure, ValidVec
 using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
-import .PSRNmodel: PSRN
+using PythonCall
+import .PSRNmodel: PSRN, now_device, torch, torch_tensor_ref, array_class_ref
 
 @stable default_mode = "disable" begin
     include("deprecates.jl")
@@ -804,29 +805,73 @@ mutable struct PSRNManager
     N_PSRN_INPUT::Int
     net::Any
     max_samples::Int
+    _initialized::Bool
+    operators::Vector{String}
+    n_symbol_layers::Int
+    options::Options
 
-    function PSRNManager(;
-        N_PSRN_INPUT::Int,
-        operators::Vector{String},
-        n_symbol_layers::Int,
-        options::Options,
-        max_samples::Int=100, # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
-    )
-        # psrn = PSRN(;
-        #     n_variables=N_PSRN_INPUT,
-        #     operators=operators,
-        #     n_symbol_layers=n_symbol_layers,
-        #     dr_mask=nothing,
-        #     device=0,
-        #     options=options,
-        # )
-        psrn = 1
-
-        return new(
-            Channel{Vector{Expression}}(32), nothing, 0, N_PSRN_INPUT, psrn, max_samples
+    function PSRNManager()
+        new(
+            Channel{Vector{Expression}}(32),
+            nothing,
+            0,
+            0,
+            nothing,
+            0,
+            false,
+            String[],
+            0,
+            Options()
         )
     end
 end
+
+# 内部初始化函数
+const _init_psrn = Ref{Union{Nothing,Function}}(nothing)
+# const array_class_ref = Ref{Py}()
+# const torch_tensor_ref = Ref{Py}()
+
+function __init__()
+    _init_psrn[] = (N_PSRN_INPUT, operators, n_symbol_layers) -> begin
+        psrn = PSRN[](
+            Py(N_PSRN_INPUT),
+            Py(operators),
+            Py(n_symbol_layers),
+            pybuiltins.None,
+            now_device[]
+        )
+        psrn.to(now_device[])
+    end
+    # torch_tensor_ref[] = pyimport("torch").Tensor
+    # array_class_ref[] = pyimport("array").array # 注意这个 array 是类，所有要这样导入
+
+end
+
+# 顶层初始化函数
+function initialize!(
+    manager::PSRNManager;
+    N_PSRN_INPUT::Int,
+    operators::Vector{String},
+    n_symbol_layers::Int,
+    options::Options,
+    max_samples::Int=100
+)
+    manager.N_PSRN_INPUT = N_PSRN_INPUT
+    manager.operators = operators
+    manager.n_symbol_layers = n_symbol_layers
+    manager.options = options
+    manager.max_samples = max_samples
+
+    if !manager._initialized
+        if isnothing(_init_psrn[])
+            return "Module not properly initialized"
+        end
+        manager.net = _init_psrn[](N_PSRN_INPUT, operators, n_symbol_layers)
+        manager._initialized = true
+    end
+    return manager
+end
+
 
 function select_top_subtrees(
     common_subtrees::Dict{Node,Int}, 
@@ -1048,8 +1093,9 @@ function start_psrn_task(
             @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
-
+            @info "✨"
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
+            @info "✨✨"
 
             # @info "Selected subtrees:" top_subtrees
             # @info "✨Selected subtrees:"
@@ -1058,7 +1104,8 @@ function start_psrn_task(
             # end
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-
+            @info "✨✨✨"
+            
             # add downsampling 
             n_samples = size(X_mapped, 1)
             if n_samples > manager.max_samples
@@ -1084,11 +1131,28 @@ function start_psrn_task(
             X_mapped_sampled = Float16.(X_mapped_sampled) # for saving memory
             y_sampled = Float16.(y_sampled) # for saving memory
 
+            @info "size 🎇 $(size(X_mapped_sampled))"
+            @info "size 🎇 $(size(y_sampled))"
+
+
             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
 
             # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
             # y_sampled = to(y_sampled, CUDA(0))
-
+            @info "✨✨✨"
+            row, col = size(X_mapped_sampled)
+            X_mapped_sampled_pyarray = array_class_ref[]('f',X_mapped_sampled')
+            @info "X_mapped_sampled_pyarray 是这样的👇"
+            @info X_mapped_sampled_pyarray
+            @info "✨✨✨✨"
+            y_sampled_pyarray = array_class_ref[]('f',y_sampled)
+            @info "✨✨✨✨✨" # TODO 多线程启动julia会卡在移动到cuda的过程种
+            X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
+            X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.reshape(row, col)
+            # X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
+            @info "✨✨✨✨✨✨"
+            y_sampled_pytorch = torch_tensor_ref[](y_sampled_pyarray).to(now_device[])
+            @info "✨✨✨✨✨✨✨"
             n_variables = size(X_mapped_sampled, 2)
             variable_names = ["x$i" for i in 1:n_variables]
             manager.net.current_expr_ls = if isnothing(top_subtrees)
@@ -1118,13 +1182,61 @@ function start_psrn_task(
                 )
             end
 
-            best_expressions = get_best_expr_and_MSE_topk(
-                manager.net, X_mapped_sampled, y_sampled, 100, device_id
+            # best_expressions = get_best_expr_and_MSE_topk(
+            #     manager.net, X_mapped_sampled, y_sampled, 100, device_id
+            # )
+
+
+            sum_ = torch[].zeros((1, manager.net.out_dim), device=manager.net.device)
+            # for i in range(X.shape[0]):
+            for i in 0:row-1
+                H = manager.net.forward(X_mapped_sampled_pytorch[i].reshape(1, -1))
+                diff = H - y_sampled_pytorch[i]
+                square = pymul(diff, diff)
+                sum_ = sum_ + square
+            end
+            mean = sum_ / row
+            mean = mean.reshape(-1)
+
+            # replace all nan, -inf to inf
+            mean[torch[].isnan(mean)] = pybuiltins.float(Py("inf"))
+            mean[torch[].isinf(mean)] = pybuiltins.float(Py("inf"))
+
+            values, indices = torch[].topk(mean, 2, largest=Py(false), sorted=Py(true))
+
+            best_expressions = Expression[]
+
+
+            # 设置运算符选项
+            options = Options(;
+                binary_operators=[+, -, *, /],
+                unary_operators=[cos, exp, sin, log]
             )
+            operators = options.operators
+            
+            # 创建变量名列表
+            variable_names = ["x$i" for i in 0:n_variables-1]
+            
+            # 创建表达式列表
+            manager.net.current_expr_ls = [Expression(Node(Float32; feature=i); operators, variable_names) 
+                                    for i in 1:n_variables]
+
+
+            # for i in tqdm(indices.tolist()):
+            for i in 0:pylen(indices)-1
+                expr = manager.net.get_expr(i)
+                # best_expressions.append()
+                expr_jl = pyconvert(Expression, expr)
+                # 转换为 Float32 类型
+                # expr_jl = convert_type(Float32, expr_jl)
+                push!(best_expressions, expr_jl)
+                println("Expression $i: ", expr_jl)
+            end 
+            @info "expr_best_ls:"
+            @info "👉👉👉👉👉👉👉"
 
             put!(manager.channel, best_expressions)
 
-            # @info "best_expressions: $best_expressions"
         catch e
             bt = stacktrace(catch_backtrace())
             @error """
@@ -1202,29 +1314,34 @@ function _main_search_loop!(
 
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
-        # N_PSRN_INPUT = 3
-        N_PSRN_INPUT = 4 # TODO this can be tuned
-        # N_PSRN_INPUT = 4 # TODO this can be tuned
 
-        psrn_manager = PSRNManager(;
-            N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
-            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
+        psrn_manager = PSRNManager()
 
-            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Sin", "Cos", "Exp", "Log", "Sqrt"], # TODO maybe we can place this in options
-            operators=["Sub", "Div", "Identity", "Inv", "Neg", "Sin", "Cos", "Exp", "Log", "Sqrt"], # TODO maybe we can place this in options
-            # operators=["Sub", "Div", "Identity", "Inv", "Neg", "Sqrt"], # TODO maybe we can place this in options
+        N_PSRN_INPUT = 2
+        n_symbol_layers = 1
+        max_samples = 20
+        operators = ["Add", "Identity"]
 
-
-            # operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
-            # operators=["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
-            # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-            # operators = ["Sub", "Div", "Identity"],
-            # operators = ["Add", "Mul", "Neg", "Inv", "Identity"],
-            n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
+        initialize!(
+            psrn_manager,
+            N_PSRN_INPUT=N_PSRN_INPUT,
+            operators=operators,
+            n_symbol_layers=n_symbol_layers,
             options=options,
-            max_samples=20,
-            # max_samples = 10
+            max_samples=max_samples
         )
+
+        # # 如果需要修改参数并重新初始化
+        # manager._initialized = false  # 重置初始化状态
+        # initialize!(
+        #     manager,
+        #     N_PSRN_INPUT=20,  # 新的参数
+        #     operators=["Add", "Mul", "Identity"],  # 新的运算符
+        #     n_symbol_layers=4,
+        #     options=new_options,
+        #     max_samples=200
+        # )
+
     else
         println("Not use PSRN")
     end

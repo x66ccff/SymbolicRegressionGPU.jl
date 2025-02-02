@@ -31,27 +31,36 @@ using PythonCall
 const torch = Ref{Py}()
 const nn = Ref{Py}()
 
-const Identity_op = Ref{Py}()
-const Add_op = Ref{Py}()
+# const array = Ref{Py}()
+
+const array_class_ref = Ref{Py}()
+const torch_tensor_ref = Ref{Py}()
+
 
 const CanCountLeaveOperator = Ref{Py}()
 const DRLayer = Ref{Py}()
 const SymbolLayer = Ref{Py}()
 const PSRN = Ref{Py}()
 
+const op_dict = Ref{Dict}()
+const kernel_dict = Ref{Dict}()
+
+const Identity_op = Ref{Py}()
+const Add_op = Ref{Py}()
+
 const Identity = Ref{Py}()
 const Add = Ref{Py}()
 
-
-
-# Add_op
-
+const now_device = Ref{Py}()
 
 
 function __init__()
     # 检查是否有可用的CUDA设备
     torch[] = pyimport("torch")
     nn[] = pyimport("torch.nn")
+
+    torch_tensor_ref[] = pyimport("torch").Tensor
+    array_class_ref[] = pyimport("array").array # 注意这个 array 是类，所有要这样导入
 
     # 基础运算符类
     CanCountLeaveOperator[] = pytype("CanCountLeaveOperator", (nn[].Module,), [
@@ -64,10 +73,6 @@ function __init__()
             end
         )
     ])
-
-
-
-
 
     # Duplicate Removal Layer
     DRLayer[] = pytype("DRLayer", (nn[].Module,), [
@@ -126,13 +131,13 @@ function __init__()
                 self.offset_tensor = Py(nothing)
                 
                 for op_str in operators
-                    self.list.append(kernel_dict[op_str](in_dim))
+                    self.list.append(kernel_dict[][op_str](in_dim))
                 end
 
                 # 计算输出维度
                 self.out_dim = 0
                 for op_str in operators
-                    op = op_dict[op_str]
+                    op = op_dict[][op_str]
                     if pyconvert(Bool, op.is_unary)
                         res = pyconvert(Int, in_dim)
                     else
@@ -162,6 +167,10 @@ function __init__()
                 for i in 1:pylen(self.list)
                     md = self.list[pyindex(i-1)]
                     res = md(x)
+                    @info "md"
+                    @info md
+                    @info "res.shape"
+                    @info res.shape
                     h.append(res)
                 end
                 @info "h ============"
@@ -435,9 +444,6 @@ function __init__()
             (self, x1, x2) -> x1 + x2
         )
     ])
-    
-    @info Add_op[]()
-
 
     Identity_op[] = pytype("Identity_op", (), [
         "__module__" => "__main__",
@@ -458,9 +464,6 @@ function __init__()
             (self, x) -> x
         )
     ])
-
-
-
 
     # Identity类
     Identity[] = pytype("Identity", (CanCountLeaveOperator[],), [
@@ -514,14 +517,14 @@ function __init__()
                 indices = torch[].triu_indices(
                     self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
                 )
-                out = x[pyslice(0,2), indices[0]] + x[pyslice(0,2), indices[1]]
+                out = x[pyslice(nothing), indices[0]] + x[pyslice(nothing), indices[1]]
                 return out
             end
         )
     ])
 
     # 初始化运算符字典
-    op_dict = Dict(
+    op_dict[] = Dict(
         pystr("Add") => Add_op[](),
         # pystr("Mul") => Mul_op(),
         pystr("Identity") => Identity_op[](),
@@ -546,7 +549,7 @@ function __init__()
         # pystr("Sqrt") => Sqrt_op()
     )
 
-    kernel_dict = Dict(
+    kernel_dict[] = Dict(
         pystr("Add") => Add[],
         # pystr("Mul") => Mul,
         pystr("Identity") => Identity[],
@@ -574,89 +577,86 @@ function __init__()
 
     is_cuda_available = pyconvert(Bool, torch[].cuda.is_available())
     if is_cuda_available
-        @info "Yes 😀"
+        @info "Yes, cuda is available 😀"
     else 
-        @info "No 😭"
+        @info "No, cuda is not available 😭"
     end
-    device = torch[].device(is_cuda_available ? "cuda" : "cpu")
+    now_device[] = torch[].device(is_cuda_available ? "cuda" : "cpu")
+
     # # device = torch_device(is_cuda_available ? "cpu" : "cpu")
-    println("Using device: ", device)
+    println("Using device: ", now_device[])
 
-    n_variables = 3
-    n_symbol_layers = 3
+    # n_variables = 3
+    # n_symbol_layers = 3
 
-    # n_variables = 1
-    # n_symbol_layers = 1
-    # @info pybuiltins.None
-    @info pybuiltins.None
-
+    # # n_variables = 1
+    # # n_symbol_layers = 1
+    # # @info pybuiltins.None
     
-    # 创建一些随机输入数据
-    x = torch[].randn((1, n_variables), device=device)
-    println("\nInput shape: ", x.shape)
-    println("Input data:\n", x)
+    # # 创建一些随机输入数据
+    # x = torch[].randn((1, n_variables), device=now_device[])
+    # println("\nInput shape: ", x.shape)
+    # println("Input data:\n", x)
 
-    # test Add()
-    myadd = Add[](Py(n_variables))
-    println("\nAdd(): ", myadd)
-    res = myadd(x)
-    @info myadd(x).shape
-    @info "👆"
+    # # test Add()
+    # myadd = Add[](Py(n_variables))
+    # println("\nAdd(): ", myadd)
+    # res = myadd(x)
+    # @info myadd(x).shape
+    # @info "👆"
 
-    # # 创建PSRN模型
-    model = PSRN[](
-        Py(n_variables),  # n_variables
-        # Py(["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin","Exp","Log"]),  # operators cos, inv bug todo
-        Py(["Add", "Identity"]),  # operators
-        Py(n_symbol_layers),  # n_symbol_layers
-        pybuiltins.None,  # dr_mask
-        device  # device
-    )
+    # # # 创建PSRN模型
+    # model = PSRN[](
+    #     Py(n_variables),  # n_variables
+    #     # Py(["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin","Exp","Log"]),  # operators cos, inv bug todo
+    #     Py(["Add", "Identity"]),  # operators
+    #     Py(n_symbol_layers),  # n_symbol_layers
+    #     pybuiltins.None,  # dr_mask
+    #     now_device[]  # device
+    # )
     
-    # 将模型移到指定设备
-    model = model.to(device)
+    # # 将模型移到指定设备
+    # model = model.to(now_device[])
 
 
-    
-    # 前向传播
-    output = model(x)
-    println("\nOutput shape: ", output.shape)
-    @info "output.shape"
-    @info output.shape
+    # # 前向传播
+    # output = model(x)
+    # println("\nOutput shape: ", output.shape)
+    # @info "output.shape"
+    # @info output.shape
     
     
 
-    # 设置运算符选项
-    options = Options(;
-        binary_operators=[+, -, *, /],
-        unary_operators=[cos, exp, sin, log]
-    )
-    operators = options.operators
+    # # 设置运算符选项
+    # options = Options(;
+    #     binary_operators=[+, -, *, /],
+    #     unary_operators=[cos, exp, sin, log]
+    # )
+    # operators = options.operators
     
-    # 创建变量名列表
-    variable_names = ["x$i" for i in 0:n_variables-1]
+    # # 创建变量名列表
+    # variable_names = ["x$i" for i in 0:n_variables-1]
     
-    # 创建表达式列表
-    model.current_expr_ls = [Expression(Node(Float64; feature=i); operators, variable_names) 
-                            for i in 1:n_variables]
-    # 创建符号变量
-    # vars = [SymbolicUtils.Sym{Real}(Symbol("x$i")) for i in 0:n_variables-1]
-    # vars = [Node(Float64; feature=i) for i in 0:n_variables-1]
-    # model.current_expr_ls = vars
+    # # 创建表达式列表
+    # model.current_expr_ls = [Expression(Node(Float64; feature=i); operators, variable_names) 
+    #                         for i in 1:n_variables]
+    # # 创建符号变量
+    # # vars = [SymbolicUtils.Sym{Real}(Symbol("x$i")) for i in 0:n_variables-1]
+    # # vars = [Node(Float64; feature=i) for i in 0:n_variables-1]
+    # # model.current_expr_ls = vars
 
-    @info model.current_expr_ls
+    # @info model.current_expr_ls
 
-    # 获取一些表达式示例
-    println("\nSome expression examples:")
-    for i in 0:min(1000,pyconvert(Int,output.shape[1]))-1
-        expr = model.get_expr(i)
-        println("Expression $i: ", expr)
-    end
+    # # 获取一些表达式示例
+    # println("\nSome expression examples:")
+    # for i in 0:min(1000,pyconvert(Int,output.shape[1]))-1
+    #     expr = model.get_expr(i)
+    #     println("Expression $i: ", expr)
+    # end
     
     # return model, x, output
 end
 
-export PSRN
-
+export PSRN, now_device, torch, torch_tensor_ref, array_class_ref
 
 end

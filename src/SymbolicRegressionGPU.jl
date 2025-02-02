@@ -1104,7 +1104,7 @@ function start_psrn_task(
             # end
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-            @info "✨✨✨"
+            # @info "✨✨✨"
             
             # add downsampling 
             n_samples = size(X_mapped, 1)
@@ -1131,28 +1131,28 @@ function start_psrn_task(
             X_mapped_sampled = Float16.(X_mapped_sampled) # for saving memory
             y_sampled = Float16.(y_sampled) # for saving memory
 
-            @info "size 🎇 $(size(X_mapped_sampled))"
-            @info "size 🎇 $(size(y_sampled))"
+            # @info "size 🎇 $(size(X_mapped_sampled))"
+            # @info "size 🎇 $(size(y_sampled))"
 
 
             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
 
             # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
             # y_sampled = to(y_sampled, CUDA(0))
-            @info "✨✨✨"
+            # @info "✨✨✨"
             row, col = size(X_mapped_sampled)
             X_mapped_sampled_pyarray = array_class_ref[]('f',X_mapped_sampled')
-            @info "X_mapped_sampled_pyarray 是这样的👇"
-            @info X_mapped_sampled_pyarray
-            @info "✨✨✨✨"
+            # @info "X_mapped_sampled_pyarray 是这样的👇"
+            # @info X_mapped_sampled_pyarray
+            # @info "✨✨✨✨"
             y_sampled_pyarray = array_class_ref[]('f',y_sampled)
-            @info "✨✨✨✨✨" # TODO 多线程启动julia会卡在移动到cuda的过程种
+            # @info "✨✨✨✨✨" # TODO 多线程启动julia会卡在移动到cuda的过程种
             X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
             X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.reshape(row, col)
             # X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
-            @info "✨✨✨✨✨✨"
+            # @info "✨✨✨✨✨✨"
             y_sampled_pytorch = torch_tensor_ref[](y_sampled_pyarray).to(now_device[])
-            @info "✨✨✨✨✨✨✨"
+            # @info "✨✨✨✨✨✨✨"
             n_variables = size(X_mapped_sampled, 2)
             variable_names = ["x$i" for i in 1:n_variables]
             manager.net.current_expr_ls = if isnothing(top_subtrees)
@@ -1202,7 +1202,7 @@ function start_psrn_task(
             mean[torch[].isnan(mean)] = pybuiltins.float(Py("inf"))
             mean[torch[].isinf(mean)] = pybuiltins.float(Py("inf"))
 
-            values, indices = torch[].topk(mean, 2, largest=Py(false), sorted=Py(true))
+            values, indices = torch[].topk(mean, 20, largest=Py(false), sorted=Py(true))
 
             best_expressions = Expression[]
 
@@ -1215,12 +1215,13 @@ function start_psrn_task(
             operators = options.operators
             
             # 创建变量名列表
-            variable_names = ["x$i" for i in 0:n_variables-1]
+            # variable_names = ["x$i" for i in 0:n_variables-1]
             
             # 创建表达式列表
-            manager.net.current_expr_ls = [Expression(Node(Float32; feature=i); operators, variable_names) 
-                                    for i in 1:n_variables]
-
+            # manager.net.current_expr_ls = [Expression(Node(Float32; feature=i); operators, variable_names) 
+            #                         for i in 1:n_variables]
+            # manager.net.current_expr_ls = [Expression(Node(Float32; feature=i); operators, variable_names) 
+            #                         for i in 1:n_variables] # TODO 这里的错了
 
             # for i in tqdm(indices.tolist()):
             for i in 0:pylen(indices)-1
@@ -1230,10 +1231,10 @@ function start_psrn_task(
                 # 转换为 Float32 类型
                 # expr_jl = convert_type(Float32, expr_jl)
                 push!(best_expressions, expr_jl)
-                println("Expression $i: ", expr_jl)
+                # println("Expression $i: ", expr_jl)
             end 
-            @info "expr_best_ls:"
-            @info "👉👉👉👉👉👉👉"
+            # @info "expr_best_ls:"
+            # @info "👉👉👉👉👉👉👉"
 
             put!(manager.channel, best_expressions)
 
@@ -1317,8 +1318,8 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 3
-        n_symbol_layers = 3
+        N_PSRN_INPUT = 20
+        n_symbol_layers = 2
         max_samples = 20
         operators = ["Add", "Mul", "Sub", "Div", "Identity"]
 

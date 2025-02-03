@@ -58,6 +58,8 @@ const Inv_op = Ref{Py}()
 const Neg_op = Ref{Py}()
 const Sin_op = Ref{Py}()
 const Cos_op = Ref{Py}()
+const Exp_op = Ref{Py}()
+const Log_op = Ref{Py}()
 const Pow2_op = Ref{Py}()
 const Pow3_op = Ref{Py}()
 const Sqrt_op = Ref{Py}()
@@ -75,6 +77,8 @@ const Inv = Ref{Py}()
 const Neg = Ref{Py}()
 const Sin = Ref{Py}()
 const Cos = Ref{Py}()
+const Exp = Ref{Py}()
+const Log = Ref{Py}()
 const Pow2 = Ref{Py}()
 const Pow3 = Ref{Py}()
 const Sqrt = Ref{Py}()
@@ -756,6 +760,52 @@ function __init__()
             (self, x) -> x^3
         )
     ])
+
+    
+    # Exp_op
+    Exp_op[] = pytype("Exp_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, threshold=10)
+                pybuiltins.super(Exp_op[], self).__init__()
+                self.is_unary = true
+                self.threshold = threshold
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> exp(pyconvert(Expression,sub_expr))
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> torch[].exp(x)
+        )
+    ])
+
+    # Log_op
+    Log_op[] = pytype("Log_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, threshold=1e-10)
+                pybuiltins.super(Log_op[], self).__init__()
+                self.is_unary = true
+                self.threshold = threshold
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> log(pyconvert(Expression,sub_expr))
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> torch[].log(x)
+        )
+    ])
+
 ########################################## op 👆 kernel 👇 ####################
 
 
@@ -1141,6 +1191,60 @@ function __init__()
         )
     ])
 
+
+    # Exp类
+    Exp[] = pytype("Exp", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing, threshold=10)
+                pybuiltins.super(Exp[], self).__init__()
+                self.threshold = threshold
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.operator = Exp_op[]()
+                self.complexity = 4
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return torch[].exp(x)
+            end
+        )
+    ])
+
+    # Log类
+    Log[] = pytype("Log", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing, threshold=1e-10)
+                pybuiltins.super(Log[], self).__init__()
+                self.threshold = threshold
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.complexity = 4
+                self.operator = Log_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return torch[].log(x)
+            end
+        )
+    ])
+
+
     # 初始化运算符字典
     op_dict[] = Dict(
         pystr("Add") => Add_op[](),
@@ -1148,8 +1252,8 @@ function __init__()
         pystr("Identity") => Identity_op[](),
         pystr("Sin") => Sin_op[](),
         pystr("Cos") => Cos_op[](),
-        # pystr("Exp") => Exp_op(),
-        # pystr("Log") => Log_op(),
+        pystr("Exp") => Exp_op[](),
+        pystr("Log") => Log_op[](),
         pystr("Neg") => Neg_op[](),
         pystr("Inv") => Inv_op[](),
         pystr("Div") => Div_op[](),
@@ -1173,8 +1277,8 @@ function __init__()
         pystr("Identity") => Identity[],
         pystr("Sin") => Sin[],
         pystr("Cos") => Cos[],
-        # pystr("Exp") => Exp,
-        # pystr("Log") => Log,
+        pystr("Exp") => Exp[],
+        pystr("Log") => Log[],
         pystr("Neg") => Neg[],
         pystr("Inv") => Inv[],
         pystr("Div") => Div[],

@@ -911,7 +911,7 @@ function select_top_subtrees(
     filtered_subtrees = filter(pair -> begin
         node = pair.first
         comp = compute_complexity(node, options)
-        2 <= comp <= 10
+        1 <= comp <= 10
     end, common_subtrees)
 
     # 将字典转成 (node, ratio_score) 的元组数组
@@ -950,8 +950,18 @@ function select_top_subtrees(
     # 如果还没凑够，就用随机生成的树来填充
     while length(result) < n
         if isempty(available_features)
-            # 如果没有可用的feature了，就生成常数节点
-            push!(result, Node(Float32; val=rand(-5:5)))
+            # 如果没有可用的feature了，就生成随机的树
+            # push!(result, Node(Float32; val=rand(-5:5)))
+            tree = gen_random_tree(
+                1,                     # length
+                options,              # options
+                n_variables,          # nfeatures
+                Float32;
+                only_gen_bin_op=true,
+                only_gen_int_const=false,
+                feature_prob=0.8
+            )
+            push!(result, tree)
         else
             # 随机选择一个未使用的feature
             feature = rand(available_features)
@@ -1064,13 +1074,13 @@ function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
     end
 
     # 你所需的出现次数阈值（也可以只用 ratio_score 过滤）
-    threshold = 2
+    threshold = 1
 
     # 过滤掉出现次数太少或者复杂度过低的子树
     # 如果您不想用 count 做过滤，可以只用 ratio_score 做过滤；这里仅示例
     common_patterns = Dict{Node, Float64}()
     for (st, (count, rscore)) in subtree_stats
-        if count >= threshold && compute_complexity(st, options) >= 2
+        if count >= threshold && compute_complexity(st, options) >= 1
             # 将 ratio_score 作为我们后续排序使用的“全局打分”
             common_patterns[st] = rscore
         end
@@ -1359,11 +1369,12 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 5
-        n_symbol_layers = 3
-        max_samples = 100
-        operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"]
+        N_PSRN_INPUT = 40
+        n_symbol_layers = 2
+        max_samples = 20
+        # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
         # operators = ["Add", "Mul", "SemiSub","SemiDiv","Identity"]
+        operators = ["Add", "Mul", "Sub","Div", "Identity","Inv","Neg","Pow2","Pow3","Sqrt"]
 
         initialize!(
             psrn_manager,

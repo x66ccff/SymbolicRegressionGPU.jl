@@ -58,6 +58,10 @@ const Inv_op = Ref{Py}()
 const Neg_op = Ref{Py}()
 const Sin_op = Ref{Py}()
 const Cos_op = Ref{Py}()
+const Pow2_op = Ref{Py}()
+const Pow3_op = Ref{Py}()
+const Sqrt_op = Ref{Py}()
+
 
 ########################### kernel ##############
 const Identity = Ref{Py}()
@@ -71,6 +75,10 @@ const Inv = Ref{Py}()
 const Neg = Ref{Py}()
 const Sin = Ref{Py}()
 const Cos = Ref{Py}()
+const Pow2 = Ref{Py}()
+const Pow3 = Ref{Py}()
+const Sqrt = Ref{Py}()
+
 
 const now_device = Ref{Py}()
 
@@ -684,8 +692,148 @@ function __init__()
         )
     ])
 
+    Sqrt_op[] = pytype("Sqrt_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Sqrt_op[], self).__init__()
+                self.is_unary = true
+                self.is_directed = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> sqrt(pyconvert(Expression,sub_expr))
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> torch[].sqrt(x)
+        )
+    ])
 
+    # Pow2_op
+    Pow2_op[] = pytype("Pow2_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Pow2_op[], self).__init__()
+                self.is_unary = true
+                self.is_directed = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> sub_expr * sub_expr
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> x^2
+        )
+    ])
+
+    # Pow3_op
+    Pow3_op[] = pytype("Pow3_op", (), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self)
+                pybuiltins.super(Pow3_op[], self).__init__()
+                self.is_unary = true
+                self.is_directed = true
+                return
+            end
+        ),
+        pyfunc(
+            name = "get_expr",
+            (self, sub_expr) -> cube(pyconvert(Expression,sub_expr))
+        ),
+        pyfunc(
+            name = "transform_inputs",
+            (self, x) -> x^3
+        )
+    ])
 ########################################## op 👆 kernel 👇 ####################
+
+
+    # Pow2类
+    Pow2[] = pytype("Pow2", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Pow2[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.complexity = 2
+                self.operator = Pow2_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return x^2
+            end
+        )
+    ])
+
+    # Pow3类
+    Pow3[] = pytype("Pow3", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Pow3[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.complexity = 3
+                self.operator = Pow3_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return x^3
+            end
+        )
+    ])
+
+    # Sqrt类
+    Sqrt[] = pytype("Sqrt", (CanCountLeaveOperator[],), [
+        "__module__" => "__main__",
+        pyfunc(
+            name = "__init__",
+            function (self, in_dim=1, device=nothing)
+                pybuiltins.super(Sqrt[], self).__init__()
+                self.in_dim = in_dim
+                self.out_dim = in_dim
+                self.is_unary = pybool(true)
+                self.is_directed = pybool(true)
+                self.complexity = 3
+                self.operator = Sqrt_op[]()
+                self.device = device
+                return
+            end
+        ),
+        pyfunc(
+            name = "forward",
+            function (self, x)
+                return torch[].sqrt(x)
+            end
+        )
+    ])
+
 
     # Identity类
     Identity[] = pytype("Identity", (CanCountLeaveOperator[],), [
@@ -1009,14 +1157,14 @@ function __init__()
         pystr("SemiDiv") => SemiDiv_op[](),
         pystr("SemiSub") => SemiSub_op[](),
         # pystr("Sign") => Sign_op(),
-        # pystr("Pow2") => Pow2_op(),
-        # pystr("Pow3") => Pow3_op(),
+        pystr("Pow2") => Pow2_op[](),
+        pystr("Pow3") => Pow3_op[](),
         # pystr("Pow") => Pow_op(),
         # pystr("Sigmoid") => Sigmoid_op(),
         # pystr("Abs") => Abs_op(),
         # pystr("Cosh") => Cosh_op(),
         # pystr("Tanh") => Tanh_op(),
-        # pystr("Sqrt") => Sqrt_op()
+        pystr("Sqrt") => Sqrt_op[]()
     )
 
     kernel_dict[] = Dict(
@@ -1034,14 +1182,14 @@ function __init__()
         pystr("SemiDiv") => SemiDiv[],
         pystr("SemiSub") => SemiSub[],
         # pystr("Sign") => Sign,
-        # pystr("Pow2") => Pow2,
-        # pystr("Pow3") => Pow3,
+        pystr("Pow2") => Pow2[],
+        pystr("Pow3") => Pow3[],
         # pystr("Pow") => Pow,
         # pystr("Sigmoid") => Sigmoid,
         # pystr("Abs") => Abs,
         # pystr("Cosh") => Cosh,
         # pystr("Tanh") => Tanh,
-        # pystr("Sqrt") => Sqrt
+        pystr("Sqrt") => Sqrt[]
     )
 
 

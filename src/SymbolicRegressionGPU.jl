@@ -878,18 +878,17 @@ function select_top_subtrees(
     n::Int, 
     options::AbstractOptions, 
     n_variables::Int;
-    ratio_subtrees::Float64=0.5,
-    ratio_subtrees_crossover::Float64=0.4
+    ratio_subtrees::Float64=0.8,
 )
     # 确保比例之和不超过1
-    @assert ratio_subtrees + ratio_subtrees_crossover <= 1.0 "Ratios sum must be <= 1.0"
+    @assert ratio_subtrees <= 1.0 "Ratios sum must be <= 1.0"
     
     # 过滤复杂度过高的子树
     filtered_subtrees = filter(
         pair -> begin
             node = pair.first
             complexity = compute_complexity(node, options)
-            return complexity <= 10
+            return complexity <= 20
         end, common_subtrees
     )
 
@@ -935,7 +934,7 @@ function select_top_subtrees(
 
     # 填充随机的树直到达到所需数量
     while length(result) < n
-        random_tree_length = rand(2:5)
+        random_tree_length = rand(1:2)
         tree = gen_random_tree(random_tree_length, options, 
                             n_variables, Float32; 
                             only_gen_bin_op=true,
@@ -1089,7 +1088,7 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             # @info "sleep.."
-            sleep(0.5)
+            sleep(0.2)
             # @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
@@ -1181,7 +1180,11 @@ function start_psrn_task(
                     ),
                 )
             end
-
+            
+            @info "✨✨"
+            for expr in manager.net.current_expr_ls
+                @info "✨ $expr"
+            end
             # best_expressions = get_best_expr_and_MSE_topk(
             #     manager.net, X_mapped_sampled, y_sampled, 100, device_id
             # )
@@ -1210,10 +1213,6 @@ function start_psrn_task(
 
 
             # 设置运算符选项
-            options = Options(;
-                binary_operators=[+, -, *, /],
-                unary_operators=[cos, exp, sin, log]
-            )
             operators = options.operators
             
             # 创建变量名列表
@@ -1320,10 +1319,11 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 20
-        n_symbol_layers = 2
+        N_PSRN_INPUT = 5
+        n_symbol_layers = 3
         max_samples = 100
-        operators = ["Add", "Mul", "SemiSub","SemiDiv","Identity"]
+        operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"]
+        # operators = ["Add", "Mul", "SemiSub","SemiDiv","Identity"]
 
         initialize!(
             psrn_manager,

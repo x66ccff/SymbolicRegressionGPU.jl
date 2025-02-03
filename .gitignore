@@ -31,3 +31,8 @@ stat.zip
 statprof
 .aider*
 .CondaPkg
+**/csrc/
+example_SR.jl
+example2_SR.jl
+example2.jl
+*tsv

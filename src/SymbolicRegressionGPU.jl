@@ -873,9 +873,30 @@ function initialize!(
 end
 
 
-"""
-从 analyze_common_subtrees 返回的 common_subtrees（Node=>ratio_score）中选取若干子树。
-"""
+function get_used_variables(node, var_names)
+    used_vars = Set{String}()
+    
+    function traverse(n)
+        if !isnothing(n)
+            if n.constant == false && n.feature != 0x0000 && n.feature != 0xffff
+                # feature从1开始索引
+                if n.feature <= length(var_names)
+                    push!(used_vars, var_names[n.feature])
+                end
+            end
+            if isdefined(n, :l)
+                traverse(n.l)
+            end
+            if isdefined(n, :r)
+                traverse(n.r)
+            end
+        end
+    end
+    
+    traverse(node)
+    return used_vars
+end
+
 function select_top_subtrees(
     common_subtrees::Dict{Node,Float64},
     n::Int,
@@ -887,7 +908,6 @@ function select_top_subtrees(
     @assert ratio_subtrees + ratio_subtrees_crossover <= 1.0 "Ratios sum must be <= 1.0"
 
     # 先过滤掉复杂度过高或过低的子树
-    # 这里保留区间 [2, 10] 供参考
     filtered_subtrees = filter(pair -> begin
         node = pair.first
         comp = compute_complexity(node, options)
@@ -901,33 +921,49 @@ function select_top_subtrees(
     scored_nodes = Node[]
     if !isempty(filtered_pairs)
         # 根据 ratio_score 降序排序
-        # 也可以加上随机扰动
         sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.5*randn()), rev = true)
-
-        # 将排好序的节点提取出来
         scored_nodes = [p.first for p in sorted_pairs]
     end
 
     result = Node[]
-    # 先用我们得分最高的子树填充一部分
+    # 先用得分最高的子树填充一部分
     n_subtrees = min(floor(Int, n * ratio_subtrees), length(scored_nodes))
     for i in 1:n_subtrees
         push!(result, scored_nodes[i])
     end
 
+    # 获取已经使用的变量
+    variable_names = ["x$i" for i in 1:n_variables]
+    used_variables = Set{String}()
+    for node in result
+        union!(used_variables, get_used_variables(node, variable_names))
+    end
+    
+    # 获取还未使用的变量索引
+    available_features = Int[]
+    for i in 1:n_variables
+        if !("x$i" in used_variables)
+            push!(available_features, i)
+        end
+    end
+
     # 如果还没凑够，就用随机生成的树来填充
     while length(result) < n
-        # 这里仅做一个简单示例，可能只生成简单的二元操作子树
-        # random_tree_length = rand(1:2)
-        random_tree_length = 1
-        tree = gen_random_tree(random_tree_length, options, 
-                               n_variables, Float32;
-                               only_gen_bin_op=true,
-                               only_gen_int_const=true,
-                               feature_prob=0.8)
-
-        if !(tree in result)
-            push!(result, tree)
+        if isempty(available_features)
+            # 如果没有可用的feature了，就生成常数节点
+            push!(result, Node(Float32; val=rand(-5:5)))
+        else
+            # 随机选择一个未使用的feature
+            feature = rand(available_features)
+            tree = Node(Float32; feature=feature)
+            
+            if !(tree in result)
+                push!(result, tree)
+                # 更新已使用的变量
+                union!(used_variables, get_used_variables(tree, variable_names))
+                # 从可用feature中移除已使用的
+                filter!(f -> f != feature, available_features)
+            end
         end
     end
 

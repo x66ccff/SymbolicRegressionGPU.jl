@@ -873,73 +873,59 @@ function initialize!(
 end
 
 
+"""
+从 analyze_common_subtrees 返回的 common_subtrees（Node=>ratio_score）中选取若干子树。
+"""
 function select_top_subtrees(
-    common_subtrees::Dict{Node,Int}, 
-    n::Int, 
-    options::AbstractOptions, 
+    common_subtrees::Dict{Node,Float64},
+    n::Int,
+    options::AbstractOptions,
     n_variables::Int;
-    ratio_subtrees::Float64=0.8,
+    ratio_subtrees::Float64=0.5,
+    ratio_subtrees_crossover::Float64=0.4
 )
-    # 确保比例之和不超过1
-    @assert ratio_subtrees <= 1.0 "Ratios sum must be <= 1.0"
-    
-    # 过滤复杂度过高的子树
-    filtered_subtrees = filter(
-        pair -> begin
-            node = pair.first
-            complexity = compute_complexity(node, options)
-            return complexity <= 20
-        end, common_subtrees
-    )
+    @assert ratio_subtrees + ratio_subtrees_crossover <= 1.0 "Ratios sum must be <= 1.0"
 
-    # 排序并添加随机扰动
-    sorted_subtrees = sort(
-        collect(filtered_subtrees); 
-        by=x -> (x[2] * (1.0 + 0.5 * randn())), 
-        rev=true
-    )
+    # 先过滤掉复杂度过高或过低的子树
+    # 这里保留区间 [2, 10] 供参考
+    filtered_subtrees = filter(pair -> begin
+        node = pair.first
+        comp = compute_complexity(node, options)
+        2 <= comp <= 10
+    end, common_subtrees)
 
-    result = Node[]
-    
-    # 添加子树
-    n_subtrees = min(floor(Int, n * ratio_subtrees), length(sorted_subtrees))
-    for i in 1:n_subtrees
-        push!(result, sorted_subtrees[i][1])
+    # 将字典转成 (node, ratio_score) 的元组数组
+    filtered_pairs = collect(filtered_subtrees)
+
+    # 如果过滤后还有可用子树
+    scored_nodes = Node[]
+    if !isempty(filtered_pairs)
+        # 根据 ratio_score 降序排序
+        # 也可以加上随机扰动
+        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.5*randn()), rev = true)
+
+        # 将排好序的节点提取出来
+        scored_nodes = [p.first for p in sorted_pairs]
     end
 
-    # # 如果有足够的子树，进行交叉操作
-    # if length(result) >= 2
-    #     n_crossover = floor(Int, n * ratio_subtrees_crossover)
-    #     for _ in 1:n_crossover
-    #         # 随机选择两个不同的子树
-    #         idx1 = rand(1:length(result))
-    #         idx2 = idx1
-    #         while idx2 == idx1
-    #             idx2 = rand(1:length(result))
-    #         end
-            
-    #         tree1, tree2 = result[idx1], result[idx2]
-            
-    #         # 进行交叉操作
-    #         new_tree1, new_tree2 = crossover_trees(tree1, tree2)
-            
-    #         # 随机选择其中一个新树添加到结果中
-    #         new_tree = rand() < 0.5 ? new_tree1 : new_tree2
-            
-    #         if !(new_tree in result)
-    #             push!(result, new_tree)
-    #         end
-    #     end
-    # end
+    result = Node[]
+    # 先用我们得分最高的子树填充一部分
+    n_subtrees = min(floor(Int, n * ratio_subtrees), length(scored_nodes))
+    for i in 1:n_subtrees
+        push!(result, scored_nodes[i])
+    end
 
-    # 填充随机的树直到达到所需数量
+    # 如果还没凑够，就用随机生成的树来填充
     while length(result) < n
-        random_tree_length = rand(1:2)
+        # 这里仅做一个简单示例，可能只生成简单的二元操作子树
+        # random_tree_length = rand(1:2)
+        random_tree_length = 1
         tree = gen_random_tree(random_tree_length, options, 
-                            n_variables, Float32; 
-                            only_gen_bin_op=true,
-                            only_gen_int_const=true,
-                            feature_prob=0.8)
+                               n_variables, Float32;
+                               only_gen_bin_op=true,
+                               only_gen_int_const=true,
+                               feature_prob=0.8)
+
         if !(tree in result)
             push!(result, tree)
         end
@@ -947,7 +933,6 @@ function select_top_subtrees(
 
     return result
 end
-
 
 function evaluate_subtrees(
     subtrees::Vector{Node}, dataset::Dataset, options::AbstractOptions
@@ -1007,38 +992,57 @@ function evaluate_subtrees(
     return result
 end
 
+"""
+计算给定子树在所有表达式中的加权评分，即 sum( subtree_complexity / parent_complexity )。
+返回的字典结构为：
+    Dict{Node, Float64}
+其中键是子树节点，值是该子树节点所对应的打分。
+"""
 function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
-    # TODO - This is obviously not efficient, but it works for now
+    # 为每个子树同时记录：
+    #   - 出现次数 count（若你还需要对出现次数进行筛选，可继续保留 count）
+    #   - 累加的占比得分 ratio_score
+    # 这里使用一个字典，值为 (count, ratio_score)
+    subtree_stats = Dict{Node, Tuple{Int, Float64}}()  # Correct
 
-    subtree_counts = Dict{Node,Int}()
+    for expr in trees
+        # 如果该表达式有树结构
+        if !isnothing(expr.tree)
+            parent_complexity = compute_complexity(expr.tree, options)
+            # 获取该表达式的所有子树
+            subtrees = get_subtrees(expr)
 
-    for tree in trees
-        if !isnothing(tree.tree)
-            subtrees = get_subtrees(tree)
-            for subtree in subtrees
-                subtree_counts[subtree] = get(subtree_counts, subtree, 0) + 1
+            for st in subtrees
+                st_comp = compute_complexity(st, options)
+                # 子树对于该表达式的贡献
+                contribution = st_comp / parent_complexity
+
+                if haskey(subtree_stats, st)
+                    old_count, old_ratio_score = subtree_stats[st]
+                    subtree_stats[st] = (old_count + 1, old_ratio_score + contribution)
+                else
+                    subtree_stats[st] = (1, contribution)
+                end
             end
         end
     end
 
-    # threshold = length(trees) * 0.01 # TODO need to adjust this threshold in tghe future
-    threshold = 2 # TODO need to adjust this threshold in tghe future
-    # compute_complexity(tree, options)
-    common_patterns = filter(p -> p.second >= threshold && 
-                        compute_complexity(p.first, options) >= 2, 
-                        subtree_counts)
+    # 你所需的出现次数阈值（也可以只用 ratio_score 过滤）
+    threshold = 2
 
-    # if !isempty(common_patterns)
-    #     println("\n👉👉👉Common subtree patterns:")
-    #     for (pattern, count) in common_patterns
-    #         # println("- $(string_tree(pattern)) (appeared $count times)")
-    #         @info "($count times) => $(pattern) "
-    #         @info pattern
-    #     end
-    # end
+    # 过滤掉出现次数太少或者复杂度过低的子树
+    # 如果您不想用 count 做过滤，可以只用 ratio_score 做过滤；这里仅示例
+    common_patterns = Dict{Node, Float64}()
+    for (st, (count, rscore)) in subtree_stats
+        if count >= threshold && compute_complexity(st, options) >= 2
+            # 将 ratio_score 作为我们后续排序使用的“全局打分”
+            common_patterns[st] = rscore
+        end
+    end
 
     return common_patterns
 end
+
 
 # Gets all the subtrees of an expression tree
 function get_subtrees(expr::Expression)
@@ -1088,7 +1092,7 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             # @info "sleep.."
-            sleep(0.2)
+            sleep(0.1)
             # @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)

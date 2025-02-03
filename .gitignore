@@ -30,3 +30,6 @@ deps/build.log
 stat.zip
 statprof
 .aider*
+*_SR.jl
+*2.jl
+*.tsv

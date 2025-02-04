@@ -329,7 +329,7 @@ using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
 using PythonCall
-import .PSRNmodel: PSRN, now_device, torch, torch_tensor_ref, array_class_ref
+import .PSRNmodel: PSRN, now_device, torch, numpy, torch_tensor_ref, array_class_ref
 
 @stable default_mode = "disable" begin
     include("deprecates.jl")
@@ -832,12 +832,35 @@ const _init_psrn = Ref{Union{Nothing,Function}}(nothing)
 # const torch_tensor_ref = Ref{Py}()
 
 function __init__()
-    _init_psrn[] = (N_PSRN_INPUT, operators, n_symbol_layers) -> begin
+    _init_psrn[] = (N_PSRN_INPUT, operators, n_symbol_layers, use_drmask) -> begin
+
+        # N_PSRN_INPUT = 2
+        # n_symbol_layers = 3
+        # operators = pylist(["Add","Mul","Identity","Tanh","Abs"])
+        drmask_torch = pybuiltins.None
+
+        if use_drmask && n_symbol_layers >= 3
+            @info "✨✨✨✨Using drmask✨✨✨✨"
+            @info operators
+            
+            file_name_mask = "$(n_symbol_layers)_$(N_PSRN_INPUT)_[$(Py("_").join(operators))]_mask.npy"
+            dr_path = "/home/kent/_Project/PTSjl/SymbolicRegressionGPU.jl/src/dr_mask/$(file_name_mask)"
+            numpy[].load(dr_path)
+            drmask_np = numpy[].load(dr_path)
+            drmask_torch = torch[].from_numpy(drmask_np)
+        else 
+            if n_symbol_layers >= 3
+                @info "⚠️⚠️⚠️Not Using drmask, may use more vram⚠️⚠️⚠️"
+            else 
+                @info "Not Using drmask"
+            end
+        end
+
         psrn = PSRN[](
             Py(N_PSRN_INPUT),
             Py(operators),
             Py(n_symbol_layers),
-            pybuiltins.None,
+            drmask_torch,
             now_device[]
         )
         psrn.to(now_device[])
@@ -854,7 +877,8 @@ function initialize!(
     operators::Vector{String},
     n_symbol_layers::Int,
     options::Options,
-    max_samples::Int=100
+    max_samples::Int=100,
+    use_dr_mask=true
 )
     manager.N_PSRN_INPUT = N_PSRN_INPUT
     manager.operators = operators
@@ -866,7 +890,7 @@ function initialize!(
         if isnothing(_init_psrn[])
             return "Module not properly initialized"
         end
-        manager.net = _init_psrn[](N_PSRN_INPUT, operators, n_symbol_layers)
+        manager.net = _init_psrn[](N_PSRN_INPUT, operators, n_symbol_layers, use_dr_mask)
         manager._initialized = true
     end
     return manager
@@ -1369,12 +1393,14 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 40
-        n_symbol_layers = 2
+        N_PSRN_INPUT = 6
+        n_symbol_layers = 3
         max_samples = 20
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
-        # operators = ["Add", "Mul", "SemiSub","SemiDiv","Identity"]
-        operators = ["Add", "Mul", "Sub","Div", "Identity","Inv","Neg","Pow2","Pow3","Sqrt"]
+        operators = ["Add", "Mul","Identity","Neg","Inv","Sin","Cos","Exp","Log"]
+
+        # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
+        # operators = ["Add", "Mul", "Sub","Div", "Identity","Inv","Neg","Pow2","Pow3","Sqrt"]
 
         initialize!(
             psrn_manager,

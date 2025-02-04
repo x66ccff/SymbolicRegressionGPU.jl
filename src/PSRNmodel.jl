@@ -31,6 +31,9 @@ using PythonCall
 const torch = Ref{Py}()
 const nn = Ref{Py}()
 
+
+const numpy = Ref{Py}()
+
 # const array = Ref{Py}()
 
 const array_class_ref = Ref{Py}()
@@ -91,6 +94,7 @@ function __init__()
     # 检查是否有可用的CUDA设备
     torch[] = pyimport("torch")
     nn[] = pyimport("torch.nn")
+    numpy[] = pyimport("numpy")
 
     torch_tensor_ref[] = pyimport("torch").Tensor
     array_class_ref[] = pyimport("array").array # 注意这个 array 是类，所有要这样导入
@@ -117,11 +121,18 @@ function __init__()
                 pybuiltins.super(DRLayer[], self).__init__()
                 
                 self.in_dim = in_dim
-                self.dr_mask = dr_mask
+
                 self.device = device
                 
+                arange_tensor = torch[].arange(pylen(dr_mask), device=device)
+                self.dr_indices = arange_tensor[dr_mask]  # (n,)
+                self.dr_mask = dr_mask  # (n,)
+        
+                self.dr_indices = self.dr_indices.to(device)
+                self.dr_mask = self.dr_mask.to(device)
+
                 if !pyis(dr_mask, pybuiltins.None)
-                    self.out_dim = pyconvert(Int, dr_mask.sum())
+                    self.out_dim = pyconvert(Int, dr_mask.sum().item())
                 else
                     self.out_dim = pyconvert(Int, in_dim)
                 end
@@ -132,7 +143,7 @@ function __init__()
         pyfunc(
             name = "forward",
             function (self, x)
-                return x[:, self.dr_mask]
+                return x[pyslice(nothing), self.dr_mask]
             end
         ),
         pyfunc(
@@ -368,7 +379,7 @@ function __init__()
                     if pyconvert(Bool, pygt(pylen(self.list), 0)) && pyconvert(Bool, self.use_dr_mask) && pyconvert(Bool, pyeq(i, n_symbol_layers))
                         last_layer = self.list[pylen(self.list) - 1]  # Python的索引从0开始
                         self.list.append(
-                            DRLayer[](last_layer.out_dim, dr_mask=dr_mask, device=self.device)
+                            DRLayer[](last_layer.out_dim, dr_mask, device=self.device)
                         )
                     end
                     
@@ -431,9 +442,10 @@ function __init__()
                 
                 layer = self.list[layer_idx]
                 
-                if layer._get_name() == "DRLayer"
+                if pyconvert(Bool, pyeq(layer._get_name(), Py("DRLayer")))
                     new_index = layer.get_op_and_offset(index)
-                    return self._get_expr(new_index, layer_idx - 1)
+                    res = self._get_expr(new_index, layer_idx - 1)
+                    return res
                 else
                     # SymbolLayer
                     func_op, offset = layer.get_op_and_offset(index)
@@ -1307,76 +1319,6 @@ function __init__()
 
     # # device = torch_device(is_cuda_available ? "cpu" : "cpu")
     println("Using device: ", now_device[])
-
-    # n_variables = 3
-    # n_symbol_layers = 3
-
-    # # n_variables = 1
-    # # n_symbol_layers = 1
-    # # @info pybuiltins.None
-    
-    # # 创建一些随机输入数据
-    # x = torch[].randn((1, n_variables), device=now_device[])
-    # println("\nInput shape: ", x.shape)
-    # println("Input data:\n", x)
-
-    # # test Add()
-    # myadd = Add[](Py(n_variables))
-    # println("\nAdd(): ", myadd)
-    # res = myadd(x)
-    # @info myadd(x).shape
-    # @info "👆"
-
-    # # # 创建PSRN模型
-    # model = PSRN[](
-    #     Py(n_variables),  # n_variables
-    #     # Py(["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin","Exp","Log"]),  # operators cos, inv bug todo
-    #     Py(["Add", "Identity"]),  # operators
-    #     Py(n_symbol_layers),  # n_symbol_layers
-    #     pybuiltins.None,  # dr_mask
-    #     now_device[]  # device
-    # )
-    
-    # # 将模型移到指定设备
-    # model = model.to(now_device[])
-
-
-    # # 前向传播
-    # output = model(x)
-    # println("\nOutput shape: ", output.shape)
-    # @info "output.shape"
-    # @info output.shape
-    
-    
-
-    # # 设置运算符选项
-    # options = Options(;
-    #     binary_operators=[+, -, *, /],
-    #     unary_operators=[cos, exp, sin, log]
-    # )
-    # operators = options.operators
-    
-    # # 创建变量名列表
-    # variable_names = ["x$i" for i in 0:n_variables-1]
-    
-    # # 创建表达式列表
-    # model.current_expr_ls = [Expression(Node(Float64; feature=i); operators, variable_names) 
-    #                         for i in 1:n_variables]
-    # # 创建符号变量
-    # # vars = [SymbolicUtils.Sym{Real}(Symbol("x$i")) for i in 0:n_variables-1]
-    # # vars = [Node(Float64; feature=i) for i in 0:n_variables-1]
-    # # model.current_expr_ls = vars
-
-    # @info model.current_expr_ls
-
-    # # 获取一些表达式示例
-    # println("\nSome expression examples:")
-    # for i in 0:min(1000,pyconvert(Int,output.shape[1]))-1
-    #     expr = model.get_expr(i)
-    #     println("Expression $i: ", expr)
-    # end
-    
-    # return model, x, output
 end
 
 export PSRN, now_device, torch, torch_tensor_ref, array_class_ref

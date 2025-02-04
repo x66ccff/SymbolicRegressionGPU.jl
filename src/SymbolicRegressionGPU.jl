@@ -953,13 +953,13 @@ function select_top_subtrees(
             # 如果没有可用的feature了，就生成随机的树
             # push!(result, Node(Float32; val=rand(-5:5)))
             tree = gen_random_tree(
-                1,                     # length
+                rand(2:5),                     # length
                 options,              # options
                 n_variables,          # nfeatures
                 Float32;
                 only_gen_bin_op=true,
-                only_gen_int_const=false,
-                feature_prob=0.8
+                only_gen_int_const=true,
+                feature_prob=0.7
             )
             push!(result, tree)
         else

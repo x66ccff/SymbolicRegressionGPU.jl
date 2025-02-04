@@ -20,14 +20,14 @@ julia ]
 (@v1.1x) pkg> build -v SymbolicRegressionGPU
 ```
 
-> [!NOTE]
-> If an error occurs at 100% progress of cmake, it can still be used (this issue will be fixed shortly).
-
+```bash
+activate path/to/your/.julia/environments/v1.11/.CondaPkg/env
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+```
 
 ### 🏃‍♂️ 3. Run 
 ```bash
-export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
-
+# Note: only supports one thread now
 julia example.jl
 ```
 

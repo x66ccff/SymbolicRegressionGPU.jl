@@ -1347,9 +1347,14 @@ function start_psrn_task(
             # @info "👉👉👉👉👉👉👉"
 
             put!(manager.channel, best_expressions)
+            
             cleanup_pytorch_tensors()
+
+            PythonCall.pydel!(X_mapped_sampled_pytorch)
+            PythonCall.pydel!(y_sampled_pytorch)
             PythonCall.pydel!(indices)
             PythonCall.pydel!(values)
+
             PythonCall.GC.gc()
             torch[].cuda.empty_cache()
         catch e

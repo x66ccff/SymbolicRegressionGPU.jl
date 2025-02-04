@@ -973,32 +973,32 @@ function select_top_subtrees(
 
     # 如果还没凑够，就用随机生成的树来填充
     while length(result) < n
-        if isempty(available_features)
+        # if isempty(available_features)
             # 如果没有可用的feature了，就生成随机的树
             # push!(result, Node(Float32; val=rand(-5:5)))
-            tree = gen_random_tree(
-                rand(2:5),                     # length
-                options,              # options
-                n_variables,          # nfeatures
-                Float32;
-                only_gen_bin_op=true,
-                only_gen_int_const=true,
-                feature_prob=0.7
-            )
-            push!(result, tree)
-        else
-            # 随机选择一个未使用的feature
-            feature = rand(available_features)
-            tree = Node(Float32; feature=feature)
+        tree = gen_random_tree(
+            rand(1:2),                     # length
+            options,              # options
+            n_variables,          # nfeatures
+            Float32;
+            only_gen_bin_op=true,
+            only_gen_int_const=true,
+            feature_prob=0.9
+        )
+        push!(result, tree)
+        # else
+        #     # 随机选择一个未使用的feature
+        #     feature = rand(available_features)
+        #     tree = Node(Float32; feature=feature)
             
-            if !(tree in result)
-                push!(result, tree)
-                # 更新已使用的变量
-                union!(used_variables, get_used_variables(tree, variable_names))
-                # 从可用feature中移除已使用的
-                filter!(f -> f != feature, available_features)
-            end
-        end
+        #     if !(tree in result)
+        #         push!(result, tree)
+        #         # 更新已使用的变量
+        #         union!(used_variables, get_used_variables(tree, variable_names))
+        #         # 从可用feature中移除已使用的
+        #         filter!(f -> f != feature, available_features)
+        #     end
+        # end
     end
 
     return result
@@ -1309,7 +1309,7 @@ function start_psrn_task(
                 sum_.add_(diff)
                 
                 PythonCall.pydel!(diff)
-                sleep(0.02)
+                sleep(0.2)
             end
             sum_ = sum_.reshape(-1)
 
@@ -1437,7 +1437,7 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 6
+        N_PSRN_INPUT = 7
         n_symbol_layers = 3
         max_samples = 10
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
@@ -1445,7 +1445,7 @@ function _main_search_loop!(
         # operators = ["Add", "Mul", "Sub","Div","Identity"]
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
-        operators = ["Add", "Mul", "Sub","Div", "Identity","Pow2","Sqrt"]
+        operators = ["Add", "Mul", "SemiSub","SemiDiv", "Identity","Neg","Inv","Pow2","Sqrt"]
 
         initialize!(
             psrn_manager,

@@ -215,7 +215,9 @@ function __init__()
                     # torch[].cuda.empty_cache() # TODO
 
                 end
-                return torch[].cat(h, dim=1)
+                res = torch[].cat(h, dim=1)
+                PythonCall.pydel!(h)
+                return res
             end
         ),
         pyfunc(

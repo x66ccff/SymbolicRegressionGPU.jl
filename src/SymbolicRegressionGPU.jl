@@ -1145,6 +1145,9 @@ end
 get_subtrees(x::Number) = Node[]
 get_subtrees(x::Symbol) = Node[]
 
+
+
+
 function start_psrn_task(
     manager::PSRNManager,
     dominating_trees::Vector{<:Expression},
@@ -1157,11 +1160,43 @@ function start_psrn_task(
         return nothing
     end
 
+    function cleanup_pytorch_tensors()
+        # 获取 Main 模块中的所有变量名
+        vars = names(Main; all=true)
+        
+        cleaned_count = 0
+        
+        for var in vars
+            # 跳过特殊变量名(以 _ 开头的)
+            startswith(string(var), "_") && continue
+            
+            # 获取变量值
+            try
+                val = getfield(Main, var)
+                
+                # 检查是否是 Python 对象且是 torch.Tensor
+                if typeof(val) == Py && pyisinstance(val, torch[].Tensor)
+                    # 删除 tensor
+                    PythonCall.pydel!(val)
+                    cleaned_count += 1
+                    println("Cleaned tensor: $var")
+                end
+            catch
+                # 如果获取变量值失败则跳过
+                continue
+            end
+        end
+        
+        println("Total cleaned tensors: $cleaned_count")
+    end
+
     return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
+    # return manager.current_task = begin # export JULIA_NUM_THREADS=4
         try
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             # @info "sleep.."
+
             sleep(1)
             # @info "sleep OK"
 
@@ -1266,14 +1301,15 @@ function start_psrn_task(
                 H = manager.net.forward(X_mapped_sampled_pytorch[i].reshape(1, -1))
                 
                 diff = H - y_sampled_pytorch[i]
-                H = nothing
+                PythonCall.pydel!(H)
                 # square = pymul(diff, diff)
                 diff.mul_(diff)
+                
                 # sum_ = sum_ + square
                 sum_.add_(diff)
                 
-                diff = nothing
-                sleep(0.01)
+                PythonCall.pydel!(diff)
+                sleep(0.02)
             end
             sum_ = sum_.reshape(-1)
 
@@ -1281,7 +1317,7 @@ function start_psrn_task(
             sum_[torch[].isinf(sum_)] = pybuiltins.float(Py("inf"))
 
             values, indices = torch[].topk(sum_, 20, largest=Py(false), sorted=Py(true))
-            sum_ = nothing
+            PythonCall.pydel!(sum_)
             best_expressions = Expression[]
 
 
@@ -1311,6 +1347,9 @@ function start_psrn_task(
             # @info "👉👉👉👉👉👉👉"
 
             put!(manager.channel, best_expressions)
+            cleanup_pytorch_tensors()
+            PythonCall.pydel!(indices)
+            PythonCall.pydel!(values)
             PythonCall.GC.gc()
             torch[].cuda.empty_cache()
         catch e
@@ -1398,7 +1437,7 @@ function _main_search_loop!(
         max_samples = 10
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
         # operators = ["Add", "Mul","Identity","Neg","Inv","Sin","Cos","Exp","Log"]
-        operators = ["Add", "Mul", "Sub","Div","Identity","Pow2","Sqrt"]
+        operators = ["Add", "Mul", "Sub","Div","Identity"]
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
         # operators = ["Add", "Mul", "Sub","Div", "Identity","Inv","Neg","Pow2","Pow3","Sqrt"]

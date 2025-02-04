@@ -947,6 +947,7 @@ function __init__()
                     self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
                 )
                 out = x[pyslice(nothing), indices[0]] + x[pyslice(nothing), indices[1]]
+                PythonCall.pydel!(indices)
                 return out
             end
         )
@@ -975,6 +976,7 @@ function __init__()
                     self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
                 )
                 out = x[pyslice(nothing), indices[0]] * x[pyslice(nothing), indices[1]]
+                PythonCall.pydel!(indices)
                 return out
             end
         )
@@ -1116,6 +1118,7 @@ function __init__()
                 )
                 deno = x[pyslice(nothing), indices[1]]
                 num = x[pyslice(nothing), indices[0]]
+                PythonCall.pydel!(indices)
                 return num / deno
             end
         )
@@ -1145,6 +1148,7 @@ function __init__()
                     self.in_dim, self.in_dim, offset=0, dtype=torch[].int32, device=x.device
                 )
                 out = x[pyslice(nothing), indices[0]] - x[pyslice(nothing), indices[1]]
+                PythonCall.pydel!(indices)
                 return out
             end
         )

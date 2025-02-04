@@ -22,7 +22,7 @@ julia ]
 
 ```bash
 activate path/to/your/.julia/environments/v1.11/.CondaPkg/env
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+(.CondaPkg/env) $ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
 
 ### 🏃‍♂️ 3. Run 

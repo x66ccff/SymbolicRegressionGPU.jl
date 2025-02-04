@@ -844,7 +844,7 @@ function __init__()
             @info operators
             
             file_name_mask = "$(n_symbol_layers)_$(N_PSRN_INPUT)_[$(Py("_").join(operators))]_mask.npy"
-            dr_path = "/home/kent/_Project/PTSjl/SymbolicRegressionGPU.jl/src/dr_mask/$(file_name_mask)"
+            dr_path = "/home/ruankai/_Project/SymbolicRegressionGPU.jl/src/dr_mask/$(file_name_mask)"
             numpy[].load(dr_path)
             drmask_np = numpy[].load(dr_path)
             drmask_torch = torch[].from_numpy(drmask_np)

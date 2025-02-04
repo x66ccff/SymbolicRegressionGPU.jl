@@ -1162,7 +1162,7 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             # @info "sleep.."
-            sleep(0.1)
+            sleep(1)
             # @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
@@ -1259,30 +1259,29 @@ function start_psrn_task(
             for expr in manager.net.current_expr_ls
                 @info "✨ $expr"
             end
-            # best_expressions = get_best_expr_and_MSE_topk(
-            #     manager.net, X_mapped_sampled, y_sampled, 100, device_id
-            # )
-
-            X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.half()
-            y_sampled_pytorch = y_sampled_pytorch.half()
 
             sum_ = torch[].zeros((1, manager.net.out_dim), device=manager.net.device, dtype=y_sampled_pytorch.dtype)
             # for i in range(X.shape[0]):
             for i in 0:row-1
                 H = manager.net.forward(X_mapped_sampled_pytorch[i].reshape(1, -1))
+                
                 diff = H - y_sampled_pytorch[i]
-                square = pymul(diff, diff)
-                sum_ = sum_ + square
+                H = nothing
+                # square = pymul(diff, diff)
+                diff.mul_(diff)
+                # sum_ = sum_ + square
+                sum_.add_(diff)
+                
+                diff = nothing
+                sleep(0.01)
             end
-            mean = sum_ / row
-            mean = mean.reshape(-1)
+            sum_ = sum_.reshape(-1)
 
-            # replace all nan, -inf to inf
-            mean[torch[].isnan(mean)] = pybuiltins.float(Py("inf"))
-            mean[torch[].isinf(mean)] = pybuiltins.float(Py("inf"))
+            sum_[torch[].isnan(sum_)] = pybuiltins.float(Py("inf"))
+            sum_[torch[].isinf(sum_)] = pybuiltins.float(Py("inf"))
 
-            values, indices = torch[].topk(mean, 20, largest=Py(false), sorted=Py(true))
-
+            values, indices = torch[].topk(sum_, 20, largest=Py(false), sorted=Py(true))
+            sum_ = nothing
             best_expressions = Expression[]
 
 
@@ -1313,6 +1312,7 @@ function start_psrn_task(
 
             put!(manager.channel, best_expressions)
             PythonCall.GC.gc()
+            torch[].cuda.empty_cache()
         catch e
             bt = stacktrace(catch_backtrace())
             @error """
@@ -1393,11 +1393,12 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 6
+        N_PSRN_INPUT = 5
         n_symbol_layers = 3
-        max_samples = 20
+        max_samples = 10
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
-        operators = ["Add", "Mul","Identity","Neg","Inv","Sin","Cos","Exp","Log"]
+        # operators = ["Add", "Mul","Identity","Neg","Inv","Sin","Cos","Exp","Log"]
+        operators = ["Add", "Mul", "Sub","Div","Identity","Pow2","Sqrt"]
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
         # operators = ["Add", "Mul", "Sub","Div", "Identity","Inv","Neg","Pow2","Pow3","Sqrt"]
@@ -1578,7 +1579,7 @@ function _main_search_loop!(
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
             move_window!(state.all_running_search_statistics[j])
-            if !isnothing(progress_bar)
+            if !isnothing(progress_bar) # display
                 head_node_occupation = estimate_work_fraction(resource_monitor)
                 update_progress_bar!(
                     progress_bar,

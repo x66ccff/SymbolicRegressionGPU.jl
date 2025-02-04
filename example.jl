@@ -15,7 +15,7 @@ function main()
     y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
 
     options = SymbolicRegressionGPU.Options(;
-        timeout_in_seconds=60,
+        timeout_in_seconds=60000,
         binary_operators=[+, *, /, -],
         unary_operators=[sin, cos, exp, log, sqrt, square, cube],
         # population_size=100,
@@ -32,7 +32,7 @@ function main()
         # optimizer_f_calls_limit=1000,
         # optimizer_probability=0.02,
         # complexity_of_constants=3,
-        early_stop_condition=(l, c) -> (l < 1e-6 && c <= 5) || (l < 1e-10 && c <= 10),
+        # early_stop_condition=(l, c) -> (l < 1e-6 && c <= 5) || (l < 1e-10 && c <= 10),
         constraints = [
             sin => 9,
             cos => 9,
@@ -72,7 +72,7 @@ function main()
     hall_of_fame = equation_search(X, y;
      options=options,
       parallelism=:multithreading,
-       niterations=300)
+       niterations=300000)
 
     dominating = calculate_pareto_frontier(hall_of_fame)
 

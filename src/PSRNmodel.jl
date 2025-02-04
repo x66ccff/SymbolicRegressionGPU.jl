@@ -209,13 +209,13 @@ function __init__()
             function (self, x)
                 h = pylist([])
                 for i in 1:pylen(self.list)
+                    # 强制当前设备上所有流的所有GPU操作完成
                     md = self.list[pyindex(i-1)]
-                    res = md(x)
-                    h.append(res)
+                    h.append(md(x))
+                    # torch[].cuda.empty_cache() # TODO
+
                 end
-                # @info "h ============"
-                h = torch[].cat(h, dim=1)
-                return h
+                return torch[].cat(h, dim=1)
             end
         ),
         pyfunc(
@@ -418,7 +418,7 @@ function __init__()
             name = "forward",
             function (self, x)
                 # shape x: (batch_size, n_variables)
-                # @info "👉forward start"
+                # @info "👉forward start $(x.shape)"
                 h = x
                 for layer in self.list
                 # @info "👉forward $layer"
@@ -916,10 +916,7 @@ function __init__()
         ),
         pyfunc(
             name = "forward",
-            function (self, x, second_device=pybuiltins.None)
-                if !pyis(second_device, pybuiltins.None)
-                    x = x.to(second_device)
-                end
+            function (self, x)
                 return x
             end
         )

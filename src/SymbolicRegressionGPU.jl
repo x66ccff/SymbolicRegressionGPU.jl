@@ -1203,6 +1203,7 @@ function start_psrn_task(
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
             # @info "✨"
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
+            shuffle!(top_subtrees)
             # @info "✨✨"
 
             # @info "Selected subtrees:" top_subtrees

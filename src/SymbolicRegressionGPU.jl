@@ -921,84 +921,177 @@ function get_used_variables(node, var_names)
     return used_vars
 end
 
+# function select_top_subtrees(
+#     common_subtrees::Dict{Node,Float64},
+#     n::Int,
+#     options::AbstractOptions,
+#     n_variables::Int;
+#     ratio_subtrees::Float64=0.2,
+#     ratio_subtrees_crossover::Float64=0.4
+# )
+#     @assert ratio_subtrees + ratio_subtrees_crossover <= 1.0 "Ratios sum must be <= 1.0"
+
+#     # 先过滤掉复杂度过高或过低的子树
+#     filtered_subtrees = filter(pair -> begin
+#         node = pair.first
+#         comp = compute_complexity(node, options)
+#         2 <= comp <= 20
+#     end, common_subtrees)
+
+#     # 将字典转成 (node, ratio_score) 的元组数组
+#     filtered_pairs = collect(filtered_subtrees)
+
+#     # 如果过滤后还有可用子树
+#     scored_nodes = Node[]
+#     if !isempty(filtered_pairs)
+#         # 根据 ratio_score 降序排序
+#         sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 1.0*randn()), rev = true)
+#         scored_nodes = [p.first for p in sorted_pairs]
+#     end
+
+#     result = Node[]
+#     # 先用得分最高的子树填充一部分
+#     n_subtrees = min(floor(Int, n * ratio_subtrees), length(scored_nodes))
+#     for i in 1:n_subtrees
+#         push!(result, scored_nodes[i])
+#     end
+
+#     # 获取已经使用的变量
+#     variable_names = ["x$i" for i in 1:n_variables]
+#     used_variables = Set{String}()
+#     for node in result
+#         union!(used_variables, get_used_variables(node, variable_names))
+#     end
+    
+#     # 获取还未使用的变量索引
+#     available_features = Int[]
+#     for i in 1:n_variables
+#         if !("x$i" in used_variables)
+#             push!(available_features, i)
+#         end
+#     end
+
+#     # 如果还没凑够，就用随机生成的树来填充
+#     while length(result) < n
+#         if isempty(available_features)
+#             # 如果没有可用的feature了，就生成随机的树
+#             # push!(result, Node(Float32; val=rand(-5:5)))
+#             tree = gen_random_tree(
+#                 rand(1:2),                     # length
+#                 options,              # options
+#                 n_variables,          # nfeatures
+#                 Float32;
+#                 only_gen_bin_op=nothing,
+#                 only_gen_int_const=true,
+#                 feature_prob=0.9
+#             )
+#             push!(result, tree)
+#         else
+#             # 随机选择一个未使用的feature
+#             feature = rand(available_features)
+#             tree = Node(Float32; feature=feature)
+            
+#             if !(tree in result)
+#                 push!(result, tree)
+#                 # 更新已使用的变量
+#                 union!(used_variables, get_used_variables(tree, variable_names))
+#                 # 从可用feature中移除已使用的
+#                 filter!(f -> f != feature, available_features)
+#             end
+#         end
+#     end
+
+#     return result
+# end
+
+
 function select_top_subtrees(
     common_subtrees::Dict{Node,Float64},
     n::Int,
     options::AbstractOptions,
     n_variables::Int;
-    ratio_subtrees::Float64=0.5,
+    ratio_subtrees::Float64=0.2,
     ratio_subtrees_crossover::Float64=0.4
 )
-    @assert ratio_subtrees + ratio_subtrees_crossover <= 1.0 "Ratios sum must be <= 1.0"
-
-    # 先过滤掉复杂度过高或过低的子树
+    result = Node[]
+    
+    # 从自由变量中随机采样30%
+    n_vars_to_sample = min(Int(floor(0.3 * n)), n_variables)
+    if n_vars_to_sample > 0
+        # 创建可用特征的数组并打乱
+        available_features = collect(1:n_variables)
+        for i in n_vars_to_sample:-1:1
+            # 随机选择一个索引
+            idx = rand(1:length(available_features))
+            feature = available_features[idx]
+            push!(result, Node(Float32; feature=feature))
+            # 从可用特征中删除已使用的
+            deleteat!(available_features, idx)
+        end
+    end
+    
+    # 从[-1,1,2,3]中随机采样填充
+    const_values = Float32[-1,1,2,3]
+    while length(result) < n && rand() < 0.5  # 0.5的概率继续填充常数
+        val = rand(const_values)
+        node = Node(Float32; val=val)
+        if !(node in result)
+            push!(result, node)
+        end
+    end
+    
+    # 准备最佳子树池
     filtered_subtrees = filter(pair -> begin
         node = pair.first
         comp = compute_complexity(node, options)
-        1 <= comp <= 10
+        2 <= comp <= 20
     end, common_subtrees)
-
-    # 将字典转成 (node, ratio_score) 的元组数组
     filtered_pairs = collect(filtered_subtrees)
-
-    # 如果过滤后还有可用子树
     scored_nodes = Node[]
     if !isempty(filtered_pairs)
-        # 根据 ratio_score 降序排序
-        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.5*randn()), rev = true)
+        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 1.0*randn()), rev = true)
         scored_nodes = [p.first for p in sorted_pairs]
     end
-
-    result = Node[]
-    # 先用得分最高的子树填充一部分
-    n_subtrees = min(floor(Int, n * ratio_subtrees), length(scored_nodes))
-    for i in 1:n_subtrees
-        push!(result, scored_nodes[i])
-    end
-
-    # 获取已经使用的变量
-    variable_names = ["x$i" for i in 1:n_variables]
-    used_variables = Set{String}()
-    for node in result
-        union!(used_variables, get_used_variables(node, variable_names))
-    end
     
-    # 获取还未使用的变量索引
-    available_features = Int[]
-    for i in 1:n_variables
-        if !("x$i" in used_variables)
-            push!(available_features, i)
-        end
-    end
-
-    # 如果还没凑够，就用随机生成的树来填充
+    # 如果还有空位，0.6概率用随机子树填充，0.4概率用最佳子树填充
     while length(result) < n
-        # if isempty(available_features)
-            # 如果没有可用的feature了，就生成随机的树
-            # push!(result, Node(Float32; val=rand(-5:5)))
-        tree = gen_random_tree(
-            rand(1:2),                     # length
-            options,              # options
-            n_variables,          # nfeatures
-            Float32;
-            only_gen_bin_op=true,
-            only_gen_int_const=true,
-            feature_prob=0.9
-        )
-        push!(result, tree)
-        # else
-        #     # 随机选择一个未使用的feature
-        #     feature = rand(available_features)
-        #     tree = Node(Float32; feature=feature)
-            
-        #     if !(tree in result)
-        #         push!(result, tree)
-        #         # 更新已使用的变量
-        #         union!(used_variables, get_used_variables(tree, variable_names))
-        #         # 从可用feature中移除已使用的
-        #         filter!(f -> f != feature, available_features)
-        #     end
-        # end
+        if rand() < 0.6
+            tree = gen_random_tree(
+                rand(1:2),        # length
+                options,          # options
+                n_variables,      # nfeatures
+                Float32;
+                only_gen_bin_op=true,
+                only_gen_int_const=true,
+                feature_prob=0.9
+            )
+            if !(tree in result)
+                push!(result, tree)
+            end
+        else
+            if !isempty(scored_nodes)
+                # 从已排序的最佳子树中选择下一个
+                idx = mod1(length(result) + 1, length(scored_nodes))
+                tree = scored_nodes[idx]
+                if !(tree in result)
+                    push!(result, tree)
+                end
+            else
+                # 如果没有可用的最佳子树，退化为随机子树
+                tree = gen_random_tree(
+                    rand(1:2),    # length
+                    options,      # options
+                    n_variables,  # nfeatures
+                    Float32;
+                    only_gen_bin_op=nothing,
+                    only_gen_int_const=true,
+                    feature_prob=0.9
+                )
+                if !(tree in result)
+                    push!(result, tree)
+                end
+            end
+        end
     end
 
     return result
@@ -1319,7 +1412,7 @@ function start_psrn_task(
             sum_[torch[].isnan(sum_)] = pybuiltins.float(Py("inf"))
             sum_[torch[].isinf(sum_)] = pybuiltins.float(Py("inf"))
 
-            values, indices = torch[].topk(sum_, 20, largest=Py(false), sorted=Py(true))
+            values, indices = torch[].topk(sum_, 100, largest=Py(false), sorted=Py(true))
             PythonCall.pydel!(sum_)
             best_expressions = Expression[]
 
@@ -1398,11 +1491,11 @@ function process_psrn_results!(
                 )
 
                 member = PopMember(dataset, converted_expr, options; deterministic=false)
-                # @info "PSRN member: $member"
+                # @info "PSRN:  $psrn_expr"
                 # @info "type of member: $(typeof(member))"
                 update_hall_of_fame!(hall_of_fame, [member], options)
             end
-            @info "Added PSRN results to hall of fame"
+            @info "✅Added PSRN results to hall of fame"
         end
     end
 end

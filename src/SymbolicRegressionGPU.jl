@@ -1044,7 +1044,7 @@ function select_top_subtrees(
     filtered_subtrees = filter(pair -> begin
         node = pair.first
         comp = compute_complexity(node, options)
-        2 <= comp <= 20
+        2 <= comp <= 10
     end, common_subtrees)
     filtered_pairs = collect(filtered_subtrees)
     scored_nodes = Node[]
@@ -1331,8 +1331,8 @@ function start_psrn_task(
             # add debug info
             # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
             # to cuda 0
-            X_mapped_sampled = Float16.(X_mapped_sampled) # for saving memory
-            y_sampled = Float16.(y_sampled) # for saving memory
+            X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
+            y_sampled = Float32.(y_sampled) # for saving memory
 
             # @info "size 🎇 $(size(X_mapped_sampled))"
             # @info "size 🎇 $(size(y_sampled))"
@@ -1387,8 +1387,13 @@ function start_psrn_task(
             
             @info "✨✨"
             for expr in manager.net.current_expr_ls
-                @info "✨ $expr"
+                @info "✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨ $expr"
             end
+            @info "✨✨"
+            @info "✨✨"
+            @info "✨✨"
+            @info "✨✨"
+            @info "✨✨"
 
             sum_ = torch[].zeros((1, manager.net.out_dim), device=manager.net.device, dtype=y_sampled_pytorch.dtype)
             # for i in range(X.shape[0]):
@@ -1535,13 +1540,13 @@ function _main_search_loop!(
 
         N_PSRN_INPUT = 8
         n_symbol_layers = 3
-        max_samples = 10
+        max_samples = 5
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
         # operators = ["Add", "Mul","Identity","Neg","Inv","Sin","Cos","Exp","Log"]
         # operators = ["Add", "Mul", "Sub","Div","Identity"]
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
-        operators = ["Add", "Mul","SemiDiv", "Identity","Neg","Inv","Pow2","Sqrt"]
+        operators = ["Add", "Mul","SemiDiv", "Identity","Neg","Inv","Sqrt","Pow3"]
 
         initialize!(
             psrn_manager,

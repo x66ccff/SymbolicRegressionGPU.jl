@@ -1196,8 +1196,9 @@ function start_psrn_task(
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             # @info "sleep.."
-
-            sleep(1)
+            # PythonCall.GC.gc()
+            # torch[].cuda.empty_cache()
+            # sleep(1)
             # @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
@@ -1310,7 +1311,8 @@ function start_psrn_task(
                 sum_.add_(diff)
                 
                 PythonCall.pydel!(diff)
-                sleep(0.2)
+                #torch[].cuda.synchronize()
+                sleep(0.05)#这个非常关键 即使时间短也完全不一样
             end
             sum_ = sum_.reshape(-1)
 
@@ -1438,7 +1440,7 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 7
+        N_PSRN_INPUT = 8
         n_symbol_layers = 3
         max_samples = 10
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
@@ -1446,7 +1448,7 @@ function _main_search_loop!(
         # operators = ["Add", "Mul", "Sub","Div","Identity"]
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
-        operators = ["Add", "Mul", "SemiSub","SemiDiv", "Identity","Neg","Inv","Pow2","Sqrt"]
+        operators = ["Add", "Mul","SemiDiv", "Identity","Neg","Inv","Pow2","Sqrt"]
 
         initialize!(
             psrn_manager,

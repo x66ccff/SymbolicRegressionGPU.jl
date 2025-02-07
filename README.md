@@ -33,6 +33,9 @@ activate path/to/your/.julia/environments/v1.11/.CondaPkg/env
 julia example.jl
 ```
 
+> [!NOTE]
+> Now only manual modification of PSRN operators and number of inputs is supported. Please modify them directly in `src/SymbolicRegressionGPU.jl`
+
 # 📚 Citing 
 
 To cite this fork SymbolicRegressionGPU.jl, please use the following BibTeX entry:

@@ -844,7 +844,7 @@ function __init__()
             @info operators
             
             file_name_mask = "$(n_symbol_layers)_$(N_PSRN_INPUT)_[$(Py("_").join(operators))]_mask.npy"
-            dr_path = "/home/ruankai/_Project/SymbolicRegressionGPU.jl/src/dr_mask/$(file_name_mask)"
+            dr_path = "/home/kent/_Project/PTSjl/SymbolicRegressionGPU.jl/src/dr_mask/$(file_name_mask)"
             numpy[].load(dr_path)
             drmask_np = numpy[].load(dr_path)
             drmask_torch = torch[].from_numpy(drmask_np)
@@ -1438,7 +1438,7 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 7
+        N_PSRN_INPUT = 5
         n_symbol_layers = 3
         max_samples = 10
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
@@ -1446,7 +1446,7 @@ function _main_search_loop!(
         # operators = ["Add", "Mul", "Sub","Div","Identity"]
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
-        operators = ["Add", "Mul", "SemiSub","SemiDiv", "Identity","Neg","Inv","Pow2","Sqrt"]
+        operators = ["Add", "Mul", "SemiSub","SemiDiv", "Identity","Sqrt"]
 
         initialize!(
             psrn_manager,

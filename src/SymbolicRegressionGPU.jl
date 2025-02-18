@@ -1115,11 +1115,25 @@ end
 
 
 # Gets all the subtrees of an expression tree
+# function get_subtrees(expr::Expression)
+#     if isnothing(expr.tree)
+#         return Node[]
+#     end
+#     return get_subtrees(expr.tree)
+# end
+
+using Symbolics: expand
+
 function get_subtrees(expr::Expression)
     if isnothing(expr.tree)
         return Node[]
     end
-    return get_subtrees(expr.tree)
+    expanded = expand(expr.tree)
+    # @info "before expand: $expr -> after expand: $expanded"
+    # @info "💥💥💥💥💥"
+    # println(expr.tree)
+    # println(expanded)
+    return vcat(get_subtrees(expr.tree), get_subtrees(expanded)) 
 end
 
 function get_subtrees(node::Node)

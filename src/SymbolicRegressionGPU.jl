@@ -1327,12 +1327,19 @@ function start_psrn_task(
                 sum_.add_(diff)
                 
                 PythonCall.pydel!(diff)
-                sleep(0.2)
+                sleep(0.05)
             end
             sum_ = sum_.reshape(-1)
 
-            sum_[torch[].isnan(sum_)] = pybuiltins.float(Py("inf"))
-            sum_[torch[].isinf(sum_)] = pybuiltins.float(Py("inf"))
+            ind1 = torch[].isnan(sum_)
+            ind2 = torch[].isinf(sum_)
+
+            sum_[ind1] = pybuiltins.float(Py("inf"))
+            sum_[ind2] = pybuiltins.float(Py("inf"))
+
+            PythonCall.pydel!(ind1)
+            PythonCall.pydel!(ind2)
+
 
             values, indices = torch[].topk(sum_, 20, largest=Py(false), sorted=Py(true))
             PythonCall.pydel!(sum_)

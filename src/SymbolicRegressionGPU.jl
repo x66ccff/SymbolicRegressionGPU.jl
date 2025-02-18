@@ -1327,7 +1327,7 @@ function start_psrn_task(
                 sum_.add_(diff)
                 
                 PythonCall.pydel!(diff)
-                sleep(0.1)
+                sleep(0.2)
             end
             sum_ = sum_.reshape(-1)
 

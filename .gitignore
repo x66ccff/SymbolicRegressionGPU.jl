@@ -35,5 +35,7 @@ statprof
 example_SR.jl
 example2_SR.jl
 example2.jl
+example3_SR.jl
+example3.jl
 *tsv
 PTS

@@ -1327,7 +1327,7 @@ function start_psrn_task(
                 sum_.add_(diff)
                 
                 PythonCall.pydel!(diff)
-                sleep(0.05)
+                sleep(0.01)
             end
             sum_ = sum_.reshape(-1)
 
@@ -1392,6 +1392,7 @@ function start_psrn_task(
             Full stack:
             $(join(string.(bt), "\n"))
             """
+            sleep(5)
             # @error """
             # PSRN task execution error:
             # Error type: $(typeof(e))

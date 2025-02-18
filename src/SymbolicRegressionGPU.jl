@@ -1122,18 +1122,21 @@ end
 #     return get_subtrees(expr.tree)
 # end
 
-using Symbolics: expand
+using Symbolics: expand, flatten_fractions, quick_cancel
 
 function get_subtrees(expr::Expression)
     if isnothing(expr.tree)
         return Node[]
     end
     expanded = expand(expr.tree)
-    # @info "before expand: $expr -> after expand: $expanded"
-    # @info "💥💥💥💥💥"
-    # println(expr.tree)
-    # println(expanded)
-    return vcat(get_subtrees(expr.tree), get_subtrees(expanded)) 
+    flattend = flatten_fractions(expr.tree)
+    canceled = quick_cancel(expr.tree)
+    return vcat(
+        get_subtrees(expr.tree),
+        get_subtrees(expanded),
+        get_subtrees(flattend),
+        get_subtrees(canceled)
+        ) 
 end
 
 function get_subtrees(node::Node)
@@ -1211,7 +1214,7 @@ function start_psrn_task(
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             # @info "sleep.."
 
-            sleep(1)
+            # sleep(1)
             # @info "sleep OK"
 
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
@@ -1324,7 +1327,7 @@ function start_psrn_task(
                 sum_.add_(diff)
                 
                 PythonCall.pydel!(diff)
-                sleep(0.2)
+                sleep(0.1)
             end
             sum_ = sum_.reshape(-1)
 

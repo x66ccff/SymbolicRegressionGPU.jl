@@ -1352,7 +1352,8 @@ function start_psrn_task(
                 sum_.add_(diff)
                 
                 PythonCall.pydel!(diff)
-                sleep(0.01)
+                # sleep(0.01)
+                GC.gc()
             end
             sum_ = sum_.reshape(-1)
 
@@ -1378,14 +1379,12 @@ function start_psrn_task(
             end 
 
             put!(manager.channel, best_expressions)
-            
-            cleanup_pytorch_tensors()
 
             PythonCall.pydel!(X_mapped_sampled_pytorch)
             PythonCall.pydel!(y_sampled_pytorch)
             PythonCall.pydel!(indices)
             PythonCall.pydel!(values)
-
+            GC.gc()
             PythonCall.GC.gc()
             torch[].cuda.empty_cache()
         catch e
@@ -1471,7 +1470,7 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 5
+        N_PSRN_INPUT = 6
         n_symbol_layers = 3
         max_samples = 10
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer

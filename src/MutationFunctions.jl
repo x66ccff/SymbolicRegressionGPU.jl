@@ -467,6 +467,7 @@ function crossover_trees(
     else # 'n'
         tree2 = node1
     end
+
     return tree1, tree2
 end
 

@@ -1,16 +1,38 @@
 module LossFunctionsModule
 
 using DispatchDoctor: @stable
-using StatsBase: StatsBase
 using DynamicExpressions:
     AbstractExpression, AbstractExpressionNode, get_tree, eval_tree_array
 using LossFunctions: LossFunctions
 using LossFunctions: SupervisedLoss
 using ..CoreModule:
-    AbstractOptions, Dataset, create_expression, DATA_TYPE, LOSS_TYPE, is_weighted
+    AbstractOptions,
+    Dataset,
+    create_expression,
+    DATA_TYPE,
+    LOSS_TYPE,
+    is_weighted,
+    get_indices,
+    get_full_dataset
 using ..ComplexityModule: compute_complexity
 using ..DimensionalAnalysisModule: violates_dimensional_constraints
 using ..InterfaceDynamicExpressionsModule: expected_array_type
+
+function _loss(
+    ::AbstractArray{T1}, ::AbstractArray{T2}, ::LT
+) where {T1,T2,LT<:Union{Function,SupervisedLoss}}
+    return error(
+        "Element type of `x` is $(T1) is different from element type of `y` which is $(T2)."
+    )
+end
+function _weighted_loss(
+    ::AbstractArray{T1}, ::AbstractArray{T2}, ::AbstractArray{T3}, ::LT
+) where {T1,T2,T3,LT<:Union{Function,SupervisedLoss}}
+    return error(
+        "Element type of `x` is $(T1), element type of `y` is $(T2), and element type of `w` is $(T3). " *
+        "All element types must be the same.",
+    )
+end
 
 function _loss(
     x::AbstractArray{T}, y::AbstractArray{T}, loss::LT
@@ -34,26 +56,15 @@ function _weighted_loss(
     end
 end
 
-"""If any of the indices are `nothing`, just return."""
-@inline function maybe_getindex(v, i...)
-    if any(==(nothing), i)
-        return v
-    else
-        return getindex(v, i...)
-    end
-end
-
 @stable(
     default_mode = "disable",
     default_union_limit = 2,
     begin
         function eval_tree_dispatch(
-            tree::AbstractExpression, dataset::Dataset, options::AbstractOptions, idx
+            tree::AbstractExpression, dataset::Dataset, options::AbstractOptions
         )
             A = expected_array_type(dataset.X, typeof(tree))
-            out, complete = eval_tree_array(
-                tree, maybe_getindex(dataset.X, :, idx), options
-            )
+            out, complete = eval_tree_array(tree, dataset.X, options)
             if isnothing(out)
                 return out, false
             else
@@ -61,12 +72,10 @@ end
             end
         end
         function eval_tree_dispatch(
-            tree::AbstractExpressionNode, dataset::Dataset, options::AbstractOptions, idx
+            tree::AbstractExpressionNode, dataset::Dataset, options::AbstractOptions
         )
             A = expected_array_type(dataset.X, typeof(tree))
-            out, complete = eval_tree_array(
-                tree, maybe_getindex(dataset.X, :, idx), options
-            )
+            out, complete = eval_tree_array(tree, dataset.X, options)
             if isnothing(out)
                 return out, false
             else
@@ -82,9 +91,8 @@ function _eval_loss(
     dataset::Dataset{T,L},
     options::AbstractOptions,
     regularization::Bool,
-    idx,
 )::L where {T<:DATA_TYPE,L<:LOSS_TYPE}
-    (prediction, completion) = eval_tree_dispatch(tree, dataset, options, idx)
+    (prediction, completion) = eval_tree_dispatch(tree, dataset, options)
     if !completion || isnothing(prediction)
         return L(Inf)
     end
@@ -92,16 +100,12 @@ function _eval_loss(
     loss_val = if is_weighted(dataset)
         _weighted_loss(
             prediction,
-            maybe_getindex(dataset.y::AbstractArray, idx),
-            maybe_getindex(dataset.weights, idx),
+            dataset.y::AbstractArray,
+            dataset.weights,
             options.elementwise_loss,
         )
     else
-        _loss(
-            prediction,
-            maybe_getindex(dataset.y::AbstractArray, idx),
-            options.elementwise_loss,
-        )
+        _loss(prediction, dataset.y::AbstractArray, options.elementwise_loss)
     end
 
     if regularization
@@ -114,21 +118,17 @@ end
 # This evaluates function F:
 function evaluator(
     f::F,
-    tree::AbstractExpressionNode{T},
+    tree::Union{AbstractExpressionNode{T},AbstractExpression{T}},
     dataset::Dataset{T,L},
     options::AbstractOptions,
     idx,
 )::L where {T<:DATA_TYPE,L<:LOSS_TYPE,F}
-    if hasmethod(f, typeof((tree, dataset, options, idx)))
-        # If user defines method that accepts batching indices:
-        return f(tree, dataset, options, idx)
-    elseif options.batching
-        error(
-            "User-defined loss function must accept batching indices if `options.batching == true`. " *
-            "For example, `f(tree, dataset, options, idx)`, where `idx` " *
-            "is `nothing` if full dataset is to be used, " *
-            "and a vector of indices otherwise.",
-        )
+    full_dataset = get_full_dataset(dataset)
+    idx = @something(idx, get_indices(dataset), Some(nothing))
+    if hasmethod(f, typeof((tree, full_dataset, options, idx)))
+        # If user defines method that accepts batching indices, we
+        # can convert the SubDataset to the old version
+        return f(tree, full_dataset, options, idx)
     else
         return f(tree, dataset, options)
     end
@@ -142,29 +142,19 @@ function eval_loss(
     regularization::Bool=true,
     idx=nothing,
 )::L where {T<:DATA_TYPE,L<:LOSS_TYPE}
-    loss_val = if options.loss_function === nothing
-        _eval_loss(tree, dataset, options, regularization, idx)
-    else
+    loss_val = if !isnothing(options.loss_function)
         f = options.loss_function::Function
-        evaluator(f, get_tree(tree), dataset, options, idx)
+        inner_tree = tree isa AbstractExpression ? get_tree(tree) : tree
+        evaluator(f, inner_tree, dataset, options, idx)
+    elseif !isnothing(options.loss_function_expression)
+        f = options.loss_function_expression::Function
+        @assert tree isa AbstractExpression
+        evaluator(f, tree, dataset, options, idx)
+    else
+        _eval_loss(tree, dataset, options, regularization)
     end
 
     return loss_val
-end
-
-function eval_loss_batched(
-    tree::Union{AbstractExpression{T},AbstractExpressionNode{T}},
-    dataset::Dataset{T,L},
-    options::AbstractOptions;
-    regularization::Bool=true,
-    idx=nothing,
-)::L where {T<:DATA_TYPE,L<:LOSS_TYPE}
-    _idx = @something(idx, batch_sample(dataset, options))
-    return eval_loss(tree, dataset, options; regularization=regularization, idx=_idx)
-end
-
-function batch_sample(dataset, options)
-    return StatsBase.sample(1:(dataset.n), options.batch_size; replace=true)::Vector{Int}
 end
 
 # Just so we can pass either PopMember or Node here:
@@ -175,8 +165,8 @@ get_tree_from_member(m) = m.tree
 # losses to use the PopMember's cached complexity for trees.
 # TODO!
 
-# Compute a score which includes a complexity penalty in the loss
-function loss_to_score(
+# Compute a cost which includes a complexity penalty in the loss
+function loss_to_cost(
     loss::L,
     use_baseline::Bool,
     baseline::L,
@@ -199,14 +189,14 @@ function loss_to_score(
 end
 
 # Score an equation
-function score_func(
+function eval_cost(
     dataset::Dataset{T,L},
     member,
     options::AbstractOptions;
     complexity::Union{Int,Nothing}=nothing,
 )::Tuple{L,L} where {T<:DATA_TYPE,L<:LOSS_TYPE}
     result_loss = eval_loss(get_tree_from_member(member), dataset, options)
-    score = loss_to_score(
+    cost = loss_to_cost(
         result_loss,
         dataset.use_baseline,
         dataset.baseline_loss,
@@ -214,28 +204,11 @@ function score_func(
         options,
         complexity,
     )
-    return score, result_loss
+    return cost, result_loss
 end
 
-# Score an equation with a small batch
-function score_func_batched(
-    dataset::Dataset{T,L},
-    member,
-    options::AbstractOptions;
-    complexity::Union{Int,Nothing}=nothing,
-    idx=nothing,
-)::Tuple{L,L} where {T<:DATA_TYPE,L<:LOSS_TYPE}
-    result_loss = eval_loss_batched(get_tree_from_member(member), dataset, options; idx=idx)
-    score = loss_to_score(
-        result_loss,
-        dataset.use_baseline,
-        dataset.baseline_loss,
-        member,
-        options,
-        complexity,
-    )
-    return score, result_loss
-end
+# Deprecated form
+function score_func end
 
 """
     update_baseline_loss!(dataset::Dataset{T,L}, options::AbstractOptions) where {T<:DATA_TYPE,L<:LOSS_TYPE}

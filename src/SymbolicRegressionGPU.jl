@@ -1207,6 +1207,11 @@ function start_psrn_task(
         println("Total cleaned tensors: $cleaned_count")
     end
 
+
+    # PythonCall.GC.gc()
+    # torch[].cuda.empty_cache() ????
+
+
     return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
     # return manager.current_task = begin # export JULIA_NUM_THREADS=4
         try
@@ -1392,7 +1397,9 @@ function start_psrn_task(
             Full stack:
             $(join(string.(bt), "\n"))
             """
-            sleep(5)
+            sleep(1)
+            PythonCall.GC.gc()
+            torch[].cuda.empty_cache()
             # @error """
             # PSRN task execution error:
             # Error type: $(typeof(e))

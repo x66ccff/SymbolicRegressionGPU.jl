@@ -1365,36 +1365,17 @@ function start_psrn_task(
             PythonCall.pydel!(ind1)
             PythonCall.pydel!(ind2)
 
-
             values, indices = torch[].topk(sum_, 20, largest=Py(false), sorted=Py(true))
             PythonCall.pydel!(sum_)
             best_expressions = Expression[]
 
-
-            # 设置运算符选项
             operators = options.operators
-            
-            # 创建变量名列表
-            # variable_names = ["x$i" for i in 0:n_variables-1]
-            
-            # 创建表达式列表
-            # manager.net.current_expr_ls = [Expression(Node(Float32; feature=i); operators, variable_names) 
-            #                         for i in 1:n_variables]
-            # manager.net.current_expr_ls = [Expression(Node(Float32; feature=i); operators, variable_names) 
-            #                         for i in 1:n_variables] # TODO 这里的错了
 
-            # for i in tqdm(indices.tolist()):
             for i in 0:pylen(indices)-1
                 expr = manager.net.get_expr(i)
-                # best_expressions.append()
                 expr_jl = pyconvert(Expression, expr)
-                # 转换为 Float32 类型
-                # expr_jl = convert_type(Float32, expr_jl)
                 push!(best_expressions, expr_jl)
-                # println("Expression $i: ", expr_jl)
             end 
-            # @info "expr_best_ls:"
-            # @info "👉👉👉👉👉👉👉"
 
             put!(manager.channel, best_expressions)
             

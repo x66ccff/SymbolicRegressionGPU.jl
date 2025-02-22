@@ -1490,7 +1490,7 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 5
+        N_PSRN_INPUT = 6
         n_symbol_layers = 3
         max_samples = 10
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer

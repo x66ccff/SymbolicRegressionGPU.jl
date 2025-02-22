@@ -2,7 +2,7 @@ module SymbolicRegressionSymbolicUtilsExt
 
 using SymbolicUtils: Symbolic
 using SymbolicRegressionGPU: AbstractExpressionNode, AbstractExpression, Node, Options
-using SymbolicRegressionGPU.MLJInterfaceModule: AbstractSRRegressor, get_options
+using SymbolicRegressionGPU.MLJInterfaceModule: AbstractSymbolicRegressor, get_options
 using DynamicExpressions: get_tree, get_operators
 
 import SymbolicRegressionGPU: node_to_symbolic, symbolic_to_node

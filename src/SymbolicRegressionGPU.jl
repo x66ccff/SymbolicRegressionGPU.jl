@@ -1353,7 +1353,7 @@ function start_psrn_task(
                 
                 PythonCall.pydel!(diff)
                 # sleep(0.01)
-                GC.gc()
+                GC.gc() # https://github.com/JuliaPy/PythonCall.jl/issues/592
             end
             sum_ = sum_.reshape(-1)
 
@@ -1385,8 +1385,8 @@ function start_psrn_task(
             PythonCall.pydel!(indices)
             PythonCall.pydel!(values)
             GC.gc()
-            PythonCall.GC.gc()
-            torch[].cuda.empty_cache()
+            # PythonCall.GC.gc()
+            # torch[].cuda.empty_cache()
         catch e
             bt = stacktrace(catch_backtrace())
             @error """
@@ -1397,9 +1397,10 @@ function start_psrn_task(
             Full stack:
             $(join(string.(bt), "\n"))
             """
-            sleep(1)
-            PythonCall.GC.gc()
-            torch[].cuda.empty_cache()
+            GC.gc()
+            # sleep(1)
+            # PythonCall.GC.gc()
+            # torch[].cuda.empty_cache()
             # @error """
             # PSRN task execution error:
             # Error type: $(typeof(e))
@@ -1472,7 +1473,7 @@ function _main_search_loop!(
 
         N_PSRN_INPUT = 6
         n_symbol_layers = 3
-        max_samples = 10
+        max_samples = 5
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
         # operators = ["Add", "Mul","Identity","Neg","Inv","Sin","Cos","Exp","Log"]
         # operators = ["Add", "Mul", "Sub","Div","Identity"]

@@ -167,7 +167,7 @@ using DynamicExpressions: with_type_parameters
 using DynamicDiff: D
 using Compat: @compat, Fix
 
-using Reactant: get_memory_allocated_gb, print_largest_arrays
+# using Reactant: get_memory_allocated_gb, print_largest_arrays
 # https://github.com/x66ccff/Reactant.jl
 # https://github.com/EnzymeAD/Reactant.jl/pull/515
 
@@ -997,14 +997,10 @@ function start_psrn_task(
     return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
         try
             manager.call_count += 1
-            @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
+            # @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
             
-
-            @info "analyze_common_subtrees time"
-            @time common_subtrees = analyze_common_subtrees(dominating_trees)
-
-            @info "select_top_subtrees time"
-            @time top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
+            common_subtrees = analyze_common_subtrees(dominating_trees)
+            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
 
             # @info "Selected subtrees:" top_subtrees
             # @info "👇"
@@ -1013,13 +1009,11 @@ function start_psrn_task(
             # end 
             # @info "👆"
 
-            @info "evaluate_subtrees time"
-            @time X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
+            X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
             # add downsampling 
-            @info "downsampling time"
             n_samples = size(X_mapped, 1)
-            @time if n_samples > manager.max_samples
+            if n_samples > manager.max_samples
                 # random sample
                 sample_indices = randperm(n_samples)[1:(manager.max_samples)]
                 X_mapped_sampled = X_mapped[sample_indices, :]
@@ -1047,10 +1041,9 @@ function start_psrn_task(
             # y_sampled = to(y_sampled, CUDA(0))
 
             # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
-            @info "set current_expr_ls time"
             n_variables = size(X_mapped_sampled, 2)
             variable_names = ["x$i" for i in 1:n_variables]
-            @time manager.net.current_expr_ls = if isnothing(top_subtrees)
+            manager.net.current_expr_ls = if isnothing(top_subtrees)
                 # Variable expressions are used by default
                 [
                     Expression(
@@ -1081,8 +1074,7 @@ function start_psrn_task(
                 manager.net, X_mapped_sampled, y_sampled
             )
 
-            @info "put channel time"
-            @time put!(manager.channel, best_expressions)
+            put!(manager.channel, best_expressions)
 
             # @info "best_expressions: $best_expressions"
         catch e
@@ -1095,6 +1087,7 @@ function start_psrn_task(
             Full stack:
             $(join(string.(bt), "\n"))
             """
+            GC.gc()
             # @error """
             # PSRN task execution error:
             # Error type: $(typeof(e))
@@ -1127,7 +1120,7 @@ function process_psrn_results!(
                 # @info "type of member: $(typeof(member))"
                 update_hall_of_fame!(hall_of_fame, [member], options)
             end
-            @info "Added PSRN results to hall of fame"
+            @info "✅Added PSRN results to hall of fame"
         end
     end
 end
@@ -1330,18 +1323,18 @@ function _main_search_loop!(
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
             move_window!(state.all_running_search_statistics[j])
-            # if !isnothing(progress_bar)
-            #     head_node_occupation = estimate_work_fraction(resource_monitor)
-            #     update_progress_bar!(
-            #         progress_bar,
-            #         only(state.halls_of_fame),
-            #         only(datasets),
-            #         options,
-            #         equation_speed,
-            #         head_node_occupation,
-            #         ropt.parallelism,
-            #     )
-            # end
+            if !isnothing(progress_bar)
+                head_node_occupation = estimate_work_fraction(resource_monitor)
+                update_progress_bar!(
+                    progress_bar,
+                    only(state.halls_of_fame),
+                    only(datasets),
+                    options,
+                    equation_speed,
+                    head_node_occupation,
+                    ropt.parallelism,
+                )
+            end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end

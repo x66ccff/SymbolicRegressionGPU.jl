@@ -32,7 +32,7 @@ julia> ]
 ```
 export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
 
-julia --project=. example.jl
+julia -t 4 --project=. example.jl
 ```
 
 # 📚 Citing 

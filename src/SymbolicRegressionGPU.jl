@@ -1227,21 +1227,11 @@ function start_psrn_task(
         println("Total cleaned tensors: $cleaned_count")
     end
 
-
-    # PythonCall.GC.gc()
-    # torch[].cuda.empty_cache() ????
-
-
     return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
     # return manager.current_task = begin # export JULIA_NUM_THREADS=4
         try
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
-            # @info "sleep.."
-
-            # sleep(1)
-            # @info "sleep OK"
-
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
             # @info "✨"
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
@@ -1276,34 +1266,16 @@ function start_psrn_task(
                 y_sampled = dataset.y
             end
 
-            # add debug info
-            # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
-            # to cuda 0
             X_mapped_sampled = Float16.(X_mapped_sampled) # for saving memory
             y_sampled = Float16.(y_sampled) # for saving memory
 
-            # @info "size 🎇 $(size(X_mapped_sampled))"
-            # @info "size 🎇 $(size(y_sampled))"
-
-
             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
-
-            # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
-            # y_sampled = to(y_sampled, CUDA(0))
-            # @info "✨✨✨"
             row, col = size(X_mapped_sampled)
             X_mapped_sampled_pyarray = array_class_ref[]('f',X_mapped_sampled')
-            # @info "X_mapped_sampled_pyarray 是这样的👇"
-            # @info X_mapped_sampled_pyarray
-            # @info "✨✨✨✨"
             y_sampled_pyarray = array_class_ref[]('f',y_sampled)
-            # @info "✨✨✨✨✨" # TODO 多线程启动julia会卡在移动到cuda的过程种
             X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
             X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.reshape(row, col)
-            # X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
-            # @info "✨✨✨✨✨✨"
             y_sampled_pytorch = torch_tensor_ref[](y_sampled_pyarray).to(now_device[])
-            # @info "✨✨✨✨✨✨✨"
             n_variables = size(X_mapped_sampled, 2)
             variable_names = ["x$i" for i in 1:n_variables]
             manager.net.current_expr_ls = if isnothing(top_subtrees)
@@ -1339,20 +1311,15 @@ function start_psrn_task(
             end
 
             sum_ = torch[].zeros((1, manager.net.out_dim), device=manager.net.device, dtype=y_sampled_pytorch.dtype)
-            # for i in range(X.shape[0]):
             for i in 0:row-1
                 H = manager.net.forward(X_mapped_sampled_pytorch[i].reshape(1, -1))
-                
                 diff = H - y_sampled_pytorch[i]
+
                 PythonCall.pydel!(H)
-                # square = pymul(diff, diff)
                 diff.mul_(diff)
-                
-                # sum_ = sum_ + square
                 sum_.add_(diff)
-                
+
                 PythonCall.pydel!(diff)
-                # sleep(0.01)
                 GC.gc() # https://github.com/JuliaPy/PythonCall.jl/issues/592
             end
             sum_ = sum_.reshape(-1)
@@ -1384,9 +1351,7 @@ function start_psrn_task(
             PythonCall.pydel!(y_sampled_pytorch)
             PythonCall.pydel!(indices)
             PythonCall.pydel!(values)
-            GC.gc()
-            # PythonCall.GC.gc()
-            # torch[].cuda.empty_cache()
+            GC.gc() # https://github.com/JuliaPy/PythonCall.jl/issues/592
         catch e
             bt = stacktrace(catch_backtrace())
             @error """

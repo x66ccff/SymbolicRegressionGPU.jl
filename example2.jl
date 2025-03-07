@@ -3,7 +3,7 @@
 # julia --project=. example.jl
 # julia example.jl
 
-using SymbolicRegressionGPU
+using SymbolicRegression
 using LoopVectorization
 using DelimitedFiles  # 用于读取TSV文件
 using Random
@@ -21,7 +21,7 @@ function main()
     # X = X[:, indices]  # 获取对应的特征
     # y = y[indices]     # 获取对应的标签
 
-    options = SymbolicRegressionGPU.Options(;
+    options = SymbolicRegression.Options(;
         timeout_in_seconds=60000000,
         binary_operators=[+, *, /, -],
         unary_operators=[sin, cos, exp, log, sqrt],

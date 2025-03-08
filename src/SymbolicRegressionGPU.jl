@@ -874,7 +874,7 @@ function select_top_subtrees(
     filtered_subtrees = filter(pair -> begin
         node = pair.first
         comp = compute_complexity(node, options)
-        1 <= comp <= 20
+        1 <= comp <= 30
     end, common_subtrees)
 
     # 将字典转成 (node, ratio_score) 的元组数组
@@ -922,7 +922,7 @@ function select_top_subtrees(
             Float32;
             only_gen_bin_op=nothing,
             only_gen_int_const=false,
-            feature_prob=0.5
+            feature_prob=0.7
         )
         push!(result, tree)
         # else
@@ -1275,7 +1275,7 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 4
-        N_PSRN_INPUT = 25 # TODO this can be tuned
+        N_PSRN_INPUT = 35 # TODO this can be tuned
         # N_PSRN_INPUT = 4 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;

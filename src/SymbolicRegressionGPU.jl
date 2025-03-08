@@ -920,7 +920,7 @@ function select_top_subtrees(
             options,              # options
             n_variables,          # nfeatures
             Float32;
-            only_gen_bin_op=nothing,
+            only_gen_bin_op=true,
             only_gen_int_const=false,
             feature_prob=0.7
         )

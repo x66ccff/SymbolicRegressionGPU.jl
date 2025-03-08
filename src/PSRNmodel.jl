@@ -479,7 +479,7 @@ function get_best_expr_and_MSE_topk(
     # end
     # println("-"^20)
 
-    # GC.gc()
+    GC.gc()
 
     return expr_best_ls
 end

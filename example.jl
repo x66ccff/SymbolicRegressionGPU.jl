@@ -1,5 +1,6 @@
 # export JULIA_NUM_THREADS=4
 # export JULIA_DEBUG=loading
+# export JULIA_DEBUG=all
 # julia --project=. example.jl
 # julia example.jl
 
@@ -17,7 +18,8 @@ function main()
     options = SymbolicRegressionGPU.Options(;
         timeout_in_seconds=60,
         binary_operators=[+, *, /, -],
-        unary_operators=[sin, cos, exp, log, sqrt],
+        # unary_operators=[sin, cos, exp, log, sqrt],
+        unary_operators=[sin, cos, exp, log],
         # population_size=100,
         # populations=15,
         batching=true,
@@ -38,7 +40,7 @@ function main()
             cos => 9,
             exp => 9,
             log => 9,
-            sqrt => 9
+            # sqrt => 9
         ],
         nested_constraints = [
             sin => [
@@ -46,14 +48,14 @@ function main()
                 cos => 0,
                 exp => 1,
                 log => 1,
-                sqrt => 1
+                # sqrt => 1
             ],
             cos => [
                 sin => 0,
                 cos => 0,
                 exp => 1,
                 log => 1,
-                sqrt => 1
+                # sqrt => 1
             ],
             exp => [
                 exp => 0,
@@ -63,9 +65,9 @@ function main()
                 exp => 0,
                 log => 0
             ],
-            sqrt => [
-                sqrt => 0
-            ]
+            # sqrt => [
+            #     sqrt => 0
+            # ]
         ]
     )
 

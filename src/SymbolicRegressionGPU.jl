@@ -997,13 +997,13 @@ function select_top_subtrees(
             # 如果没有可用的feature了，就生成随机的树
             # push!(result, Node(Float32; val=rand(-5:5)))
         tree = gen_random_tree(
-            rand(1:2),                     # length
+            rand(1:4),                     # length
             options,              # options
             n_variables,          # nfeatures
             Float32;
             only_gen_bin_op=true,
-            only_gen_int_const=true,
-            feature_prob=0.9
+            only_gen_int_const=false,
+            feature_prob=0.7
         )
         push!(result, tree)
         # else
@@ -1436,7 +1436,7 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 6
+        N_PSRN_INPUT = 7
         n_symbol_layers = 3
         max_samples = 5
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
@@ -1444,7 +1444,8 @@ function _main_search_loop!(
         # operators = ["Add", "Mul", "Sub","Div","Identity"]
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
-        operators = ["Add", "Mul", "SemiSub","SemiDiv", "Identity","Sqrt"]
+        # operators = ["Add","Mul","SemiSub","Identity","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 37.33GB
+        operators = ["Add","Mul","SemiSub","Identity","Neg","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 44 GB
 
         initialize!(
             psrn_manager,

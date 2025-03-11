@@ -1,5 +1,11 @@
 .dataset*.jl
 .hyperparams*.jl
+*tsv
+*le2.jl
+*le3.jl
+*le_SR.jl
+*le2_SR.jl
+*le3_SR.jl
 outputs
 *.csv
 *.bak

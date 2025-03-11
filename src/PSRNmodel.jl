@@ -407,16 +407,13 @@ mutable struct PSRN
         end
 
         @info "⏳compiling PSRN.diff_compiled..."
-        # d(a,b) = a .- b
         function d(a,b)
             a .-= b 
             return nothing
         end
         x = rand(T_kernel_compiling, 1, layers[end].out_dim)
-        # y = rand(T_kernel_compiling, 1, layers[end].out_dim) # TODO 
         y::T_kernel_compiling = 666.666
         xr = Reactant.to_rarray(x)
-        # yr = Reactant.to_rarray(y)
         diff_compiled = @compile d(xr,y)
         @info "👌compiling success!"
 
@@ -445,7 +442,6 @@ mutable struct PSRN
         top_k_compiled = @compile Reactant.Ops.top_k(x3r, PSRN_topk)
         @info "👌compiling success!"
 
-
         # https://github.com/EnzymeAD/Reactant.jl/issues/524
         @info "⏳compiling PSRN.set_nan_to_M_compiled..."
         M::T_kernel_compiling = 1.0*10^9
@@ -454,12 +450,10 @@ mutable struct PSRN
         x4r = Reactant.to_rarray(x4)
 
         f_is_finite = @compile Reactant.Ops.is_finite(x4r)
-        # f_fill = @compile fill!(similar(x4r), M)
         xM = ones(T_kernel_compiling, 1, layers[end].out_dim) * M
         all_M_R = Reactant.to_rarray(xM)
         f_select = @compile Reactant.Ops.select(f_is_finite(x4r), x4r, all_M_R)
         @info "👌compiling success!"
-
 
         @info "⏳compiling donate..."
         function donate(x,y)
@@ -476,7 +470,6 @@ mutable struct PSRN
 
         inplace_neg_compiled = @compile inplace_neg(x1r)
 
-        # f_select(f_is_finite(x4r), x4r, f_fill(similar(x4r), M))
         @info "👌compiling success!"
 
         return new(
@@ -507,11 +500,8 @@ function PSRN_forward(model::PSRN, x::AbstractMatrix, HR::ConcreteRArray)
     h = x
     h = ConcreteRArray(h)
     for (i, layer) in enumerate(model.layers)
-        # println("🔞IN Layer... $(i)")
         h = forward(layer, h, HR)
-        # println("🔞OUT Layer... $(i)!")
     end
-    # return h
 end
 
 function get_best_expr_and_MSE_topk(
@@ -526,48 +516,15 @@ function get_best_expr_and_MSE_topk(
     zeros_R = zeros(T_kernel_compiling, 1, model.out_dim)
     sum_squared_errors_R = Reactant.to_rarray(zeros_R)
 
-    # _p_sum_squared_errors_R = UInt(pointer_from_objref(sum_squared_errors_R))
-    # _p_sum_squared_errors_R = "0x$(string(_p_sum_squared_errors_R, base=16, pad=16))"
-    # @info "_p_sum_squared_errors_R📍 $(_p_sum_squared_errors_R)"
     HR = Reactant.to_rarray(zeros_R)
 
-    # _p_HR = UInt(pointer_from_objref(HR))
-    # _p_HR = "0x$(string(_p_HR, base=16, pad=16))"
-    # @info "_p_HR📍 $(_p_HR)"
-
-    # @info "🎇🎇🎇🎇🎇🎇 $(model.out_dim)"
-    # @info "forwarding time:"
     for i in 1:batch_size
-        # @info "🈲IN LOOP ...."
         x_sliced = X[i:i, :]
-        # print(" 👉PSRN_forward👈 ")
 
         PSRN_forward(model, x_sliced, HR)
-
-        # temp_R = PSRN_forward(model, x_sliced)
-        # model.donate_compiled(HR, temp_R)
-        # temp_R = nothing
-
-        # _p_HR = UInt(pointer_from_objref(HR))
-        # _p_HR = "0x$(string(_p_HR, base=16, pad=16))"
-        # @info "_p_HR📍 $(_p_HR)"
-
-        # print(" 👉diff_compiled👈 ")
         model.diff_compiled(HR, Y[i])
-        # print(" 👉sum_squared_add_compiled👈 ")
-        # model.sum_squared_add_compiled(sum_squared_errors_R, HR) # inplace
         model.inplace_square_compiled(HR)
         model.inplace_add_compiled(sum_squared_errors_R, HR)
-         
-        # Reactant.print_largest_arrays(10)
-        # @info "🈲OUT LOOP ...."
-        # @info "GC.......🧹"
-        # @time GC.gc()
-        # @info "GC sucess🧹"
-        # @info "👇🔥🔥🔥🔥🔥🔥🔥🔥"
-        # print_largest_arrays(100)
-        # @info "👆🔥🔥🔥🔥🔥🔥🔥🔥"
-
     end
 
     sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
@@ -576,23 +533,11 @@ function get_best_expr_and_MSE_topk(
     model.inplace_neg_compiled(sum_squared_errors_R)
     val_R, idx_R = model.top_k_compiled(sum_squared_errors_R,
                                              model.PSRN_topk)
-    # @info "val_R"
-    # @info val_R
-    # @info "idx_R"
-    # @info idx_R
     indices = vec(convert(Matrix, idx_R))
 
-    # @info "indices:"
-    # @info indices[1:10]
-
-    # @info "Best Expressions:"
-    # Get expressions for best indices
     expr_best_ls = Expression[]
     for i in indices
-        # expr = get_expr(model, Int64(i+1)) # new
-        expr = get_expr(model, Int64(i)) # new
-        # expr = get_expr(model, i) # old
-        # @info expr
+        expr = get_expr(model, Int64(i))
         push!(expr_best_ls, expr)
     end
 

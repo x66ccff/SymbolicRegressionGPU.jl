@@ -3,7 +3,7 @@
 # julia --project=. example.jl
 # julia example.jl
 
-using SymbolicRegressionGPU
+using SymbolicRegression
 using LoopVectorization
 using DelimitedFiles  # 用于读取TSV文件
 
@@ -15,10 +15,10 @@ function main()
     X = Float32.(transpose(data[:, 1:4]))  # 取前7列作为特征,转置使其符合要求的维度
     y = Float32.(data[:, 5])  # 最后一列是target
 
-    options = SymbolicRegressionGPU.Options(;
+    options = SymbolicRegression.Options(;
         timeout_in_seconds=60000000,
         binary_operators=[+, *, /, -],
-        unary_operators=[sin, cos, exp, log, sqrt, square, cube],
+        unary_operators=[sin, cos, exp, log, sqrt],
         population_size=100,
         populations=15,
         batching=true,
@@ -28,7 +28,7 @@ function main()
         maxsize=30,
         maxdepth=20,
         turbo=true,
-        complexity_of_constants=3,
+        # complexity_of_constants=3,
         # should_optimize_constants=false,
         # optimizer_iterations=4,
         # optimizer_f_calls_limit=1000,

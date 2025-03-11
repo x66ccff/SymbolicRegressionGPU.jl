@@ -549,9 +549,9 @@ function get_best_expr_and_MSE_topk(
         push!(expr_best_ls, expr)
     end
 
-    @info "GC.......🧹"
-    @time GC.gc()
-    @info "GC sucess🧹"
+    # @info "GC.......🧹"
+    # @time GC.gc()
+    # @info "GC sucess🧹"
 
     return expr_best_ls
 end

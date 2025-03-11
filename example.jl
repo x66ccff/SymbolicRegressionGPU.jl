@@ -1,6 +1,8 @@
 # export JULIA_NUM_THREADS=4
 # julia --project=. example.jl --verbose --debug-precompile
 # julia --project=. example.jl
+# export XLA_REACTANT_GPU_MEM_FRACTION=0.9
+# julia -t 16 --project=. example3.jl    
 
 using SymbolicRegression
 

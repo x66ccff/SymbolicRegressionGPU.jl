@@ -134,6 +134,25 @@ function div_kernel!(x::AbstractMatrix, n::Int, indices::AbstractMatrix)
 end
 
 
+function semisub_kernel!(x::AbstractMatrix, n::Int, indices::AbstractMatrix)
+    # 这里的indices已经是上三角的索引（由get_triu_indices生成）
+    l_idx = indices[1, :]
+    r_idx = indices[2, :]
+    l_value = x[:, l_idx]
+    r_value = x[:, r_idx]
+    res = l_value .- r_value
+    return res
+end
+
+function semidiv_kernel!(x::AbstractMatrix, n::Int, indices::AbstractMatrix)
+    # 这里的indices已经是上三角的索引（由get_triu_indices生成）
+    l_idx = indices[1, :]
+    r_idx = indices[2, :]
+    l_value = x[:, l_idx]
+    r_value = x[:, r_idx]
+    res = l_value ./ r_value
+    return res
+end
 
 
 function compile_unary_kernel(input_dim::Int, func::Function)
@@ -188,6 +207,8 @@ export identity_kernel!,
     mul_kernel!,
     div_kernel!,
     sub_kernel!,
+    semidiv_kernel!,
+    semisub_kernel!,
     neg_kernel!,
     inv_kernel!,
     sin_kernel!,

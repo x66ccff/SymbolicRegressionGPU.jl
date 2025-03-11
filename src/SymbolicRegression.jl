@@ -1162,7 +1162,8 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
-            operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
+            operators=["Add", "Mul", "SemiSub", "SemiDiv", "Identity"], # TODO maybe we can place this in options
+            # operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
             # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log", "Sqrt"], # TODO maybe we can place this in options
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Add", "Mul", "Identity"],

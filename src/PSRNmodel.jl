@@ -94,10 +94,16 @@ const OPERATORS = Dict{String,Operator}(
     "Cos" => UnaryOperator("Cos", cos_kernel!, nothing,  cos),
     "Exp" => UnaryOperator("Exp", exp_kernel!, nothing, exp),
     "Log" => UnaryOperator("Log", log_kernel!, nothing, safe_log),
+
     "Add" => BinaryTriuOperator("Add", add_kernel!, nothing,  +),
     "Mul" => BinaryTriuOperator("Mul", mul_kernel!, nothing,  *),
+
     "Div" => BinarySquaredOperator("Div", div_kernel!, nothing,  /),
     "Sub" => BinarySquaredOperator("Sub", sub_kernel!, nothing,  -),
+
+    "SemiDiv" => BinaryTriuOperator("SemiDiv", semidiv_kernel!, nothing,  /),
+    "SemiSub" => BinaryTriuOperator("SemiSub", semisub_kernel!, nothing,  -),
+
     "Inv" => UnaryOperator("Inv", inv_kernel!, nothing, x -> 1 / x),
     "Neg" => UnaryOperator("Neg", neg_kernel!, nothing,  x -> -x),
     "Sqrt" => UnaryOperator("Sqrt", sqrt_kernel!, nothing,  safe_sqrt),

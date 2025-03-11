@@ -817,7 +817,7 @@ mutable struct PSRNManager
         operators::Vector{String},
         n_symbol_layers::Int,
         options::Options,
-        max_samples::Int=20, # number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
+        max_samples::Int=5, # kk TODO number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
         PSRN_topk::Int=50,
         # PSRN_topk::Int=300,
 
@@ -1157,13 +1157,13 @@ function _main_search_loop!(
         println("Use PSRN")
         # N_PSRN_INPUT = 15
         # N_PSRN_INPUT = 20 # TODO this can be tuned
-        N_PSRN_INPUT = 3 # TODO this can be tuned
+        N_PSRN_INPUT = 4 # TODO this can be tuned
 
 
         psrn_manager = PSRNManager(;
             N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
             operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
-            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"], # TODO maybe we can place this in options
+            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log", "Sqrt"], # TODO maybe we can place this in options
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Add", "Mul", "Identity"],
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],

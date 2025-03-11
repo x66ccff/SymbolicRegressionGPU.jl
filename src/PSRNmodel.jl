@@ -100,6 +100,8 @@ const OPERATORS = Dict{String,Operator}(
     "Sub" => BinarySquaredOperator("Sub", sub_kernel!, nothing,  -),
     "Inv" => UnaryOperator("Inv", inv_kernel!, nothing, x -> 1 / x),
     "Neg" => UnaryOperator("Neg", neg_kernel!, nothing,  x -> -x),
+    "Sqrt" => UnaryOperator("Sqrt", sqrt_kernel!, nothing,  safe_sqrt),
+
 )
 
 function concat_arrays(arrays::Vector{<:AbstractMatrix})

@@ -38,42 +38,42 @@ function main()
         # optimizer_iterations=4,
         # optimizer_f_calls_limit=1000,
         # optimizer_probability=0.02,
-        complexity_of_constants=3,
+        # complexity_of_constants=3,
         early_stop_condition=(l, c) -> (l < 1e-6 && c <= 5) || (l < 1e-10 && c <= 10),
-        # constraints = [
-        #     sin => 9,
-        #     cos => 9,
-        #     exp => 9,
-        #     log => 9,
-        #     sqrt => 9
-        # ],
-        # nested_constraints = [
-        #     sin => [
-        #         sin => 0,
-        #         cos => 0,
-        #         exp => 1,
-        #         log => 1,
-        #         sqrt => 1
-        #     ],
-        #     cos => [
-        #         sin => 0,
-        #         cos => 0,
-        #         exp => 1,
-        #         log => 1,
-        #         sqrt => 1
-        #     ],
-        #     exp => [
-        #         exp => 0,
-        #         log => 0
-        #     ],
-        #     log => [
-        #         exp => 0,
-        #         log => 0
-        #     ],
-        #     sqrt => [
-        #         sqrt => 0
-        #     ]
-        # ]
+        constraints = [
+            sin => 9,
+            cos => 9,
+            exp => 9,
+            log => 9,
+            sqrt => 9
+        ],
+        nested_constraints = [
+            sin => [
+                sin => 0,
+                cos => 0,
+                exp => 1,
+                log => 1,
+                sqrt => 1
+            ],
+            cos => [
+                sin => 0,
+                cos => 0,
+                exp => 1,
+                log => 1,
+                sqrt => 1
+            ],
+            exp => [
+                exp => 0,
+                log => 0
+            ],
+            log => [
+                exp => 0,
+                log => 0
+            ],
+            sqrt => [
+                sqrt => 0
+            ]
+        ]
     )
 
     hall_of_fame = equation_search(X, y;

@@ -17,7 +17,7 @@ function main()
     y = Vector{Float32}(y)
 
     options = SymbolicRegression.Options(;
-        binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin]
+        binary_operators=[+, *, /, -], unary_operators=[cos, exp, log, sin, sqrt]
     )
 
     hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)

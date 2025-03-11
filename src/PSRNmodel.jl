@@ -526,28 +526,23 @@ function get_best_expr_and_MSE_topk(
     zeros_R = zeros(T_kernel_compiling, 1, model.out_dim)
     sum_squared_errors_R = Reactant.to_rarray(zeros_R)
 
-
     # _p_sum_squared_errors_R = UInt(pointer_from_objref(sum_squared_errors_R))
     # _p_sum_squared_errors_R = "0x$(string(_p_sum_squared_errors_R, base=16, pad=16))"
     # @info "_p_sum_squared_errors_R📍 $(_p_sum_squared_errors_R)"
-
-    @info "HR time"
-    @time HR = Reactant.to_rarray(zeros_R)
+    HR = Reactant.to_rarray(zeros_R)
 
     # _p_HR = UInt(pointer_from_objref(HR))
     # _p_HR = "0x$(string(_p_HR, base=16, pad=16))"
     # @info "_p_HR📍 $(_p_HR)"
 
-
-    @info "🎇🎇🎇🎇🎇🎇 $(model.out_dim)"
-    @info "forwarding time:"
-    @time for i in 1:batch_size
+    # @info "🎇🎇🎇🎇🎇🎇 $(model.out_dim)"
+    # @info "forwarding time:"
+    for i in 1:batch_size
         # @info "🈲IN LOOP ...."
         x_sliced = X[i:i, :]
         # print(" 👉PSRN_forward👈 ")
 
         PSRN_forward(model, x_sliced, HR)
-
 
         # temp_R = PSRN_forward(model, x_sliced)
         # model.donate_compiled(HR, temp_R)
@@ -575,26 +570,17 @@ function get_best_expr_and_MSE_topk(
 
     end
 
-
-
-    @info "fill nan time:"
-    @time sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
+    sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
                                         sum_squared_errors_R,
                                         model.all_M_R)
-
-    
-    @info "neg time"
-    @time model.inplace_neg_compiled(sum_squared_errors_R)
-
-    @info "topk sort time:"
-    @time val_R, idx_R = model.top_k_compiled(sum_squared_errors_R,
+    model.inplace_neg_compiled(sum_squared_errors_R)
+    val_R, idx_R = model.top_k_compiled(sum_squared_errors_R,
                                              model.PSRN_topk)
     # @info "val_R"
     # @info val_R
     # @info "idx_R"
     # @info idx_R
-    @info "indices time"
-    @time indices = vec(convert(Matrix, idx_R))
+    indices = vec(convert(Matrix, idx_R))
 
     # @info "indices:"
     # @info indices[1:10]
@@ -602,8 +588,7 @@ function get_best_expr_and_MSE_topk(
     # @info "Best Expressions:"
     # Get expressions for best indices
     expr_best_ls = Expression[]
-    @info "get expression time"
-    @time for i in indices
+    for i in indices
         # expr = get_expr(model, Int64(i+1)) # new
         expr = get_expr(model, Int64(i)) # new
         # expr = get_expr(model, i) # old
@@ -611,11 +596,9 @@ function get_best_expr_and_MSE_topk(
         push!(expr_best_ls, expr)
     end
 
-    
-
-    # @info "GC.......🧹"
-    # @time GC.gc()
-    # @info "GC sucess🧹"
+    @info "GC.......🧹"
+    @time GC.gc()
+    @info "GC sucess🧹"
 
     return expr_best_ls
 end

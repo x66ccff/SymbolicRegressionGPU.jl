@@ -26,13 +26,14 @@ git clone https://github.com/x66ccff/SymbolicRegressionGPU.jl
 ```julia
 julia> ]
 (@v1.x) pkg> activate .
+(SymbolicRegression) pkg> resolve
 (SymbolicRegression) pkg> instantiate
 ```
 ### 🏃‍♂️ Run 
 ```
 export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
 
-julia --project=. example.jl
+julia -t 4 --project=. example.jl
 ```
 
 # 📚 Citing 

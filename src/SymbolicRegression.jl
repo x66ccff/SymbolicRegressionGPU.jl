@@ -837,34 +837,111 @@ mutable struct PSRNManager
     end
 end
 
-function select_top_subtrees(
-    common_subtrees::Dict{Node,Int}, n::Int, options::AbstractOptions
-)
-    filtered_subtrees = filter(
-        pair -> begin
-            node = pair.first
-            complexity = compute_complexity(node, options)
-            return complexity <= 20 # TODO the 20 can be tuned
-        end, common_subtrees
-    )
 
-    sorted_subtrees = sort(
-        collect(filtered_subtrees); by=x -> (x[2] * (1.0 + 0.5 * randn())), rev=true
-    ) # TODO the 0.3 can be tuned
+function get_used_variables(node, var_names)
+    used_vars = Set{String}()
+    
+    function traverse(n)
+        if !isnothing(n)
+            if n.constant == false && n.feature != 0x0000 && n.feature != 0xffff
+                # feature从1开始索引
+                if n.feature <= length(var_names)
+                    push!(used_vars, var_names[n.feature])
+                end
+            end
+            if isdefined(n, :l)
+                traverse(n.l)
+            end
+            if isdefined(n, :r)
+                traverse(n.r)
+            end
+        end
+    end
+    
+    traverse(node)
+    return used_vars
+end
+
+function select_top_subtrees(
+    common_subtrees::Dict{Node,Float64},
+    n::Int,
+    options::AbstractOptions,
+    n_variables::Int;
+    ratio_subtrees::Float64=0.5,
+    ratio_subtrees_crossover::Float64=0.4
+)
+    @assert ratio_subtrees + ratio_subtrees_crossover <= 1.0 "Ratios sum must be <= 1.0"
+
+    # 先过滤掉复杂度过高或过低的子树
+    filtered_subtrees = filter(pair -> begin
+        node = pair.first
+        comp = compute_complexity(node, options)
+        1 <= comp <= 10
+    end, common_subtrees)
+
+    # 将字典转成 (node, ratio_score) 的元组数组
+    filtered_pairs = collect(filtered_subtrees)
+
+    # 如果过滤后还有可用子树
+    scored_nodes = Node[]
+    if !isempty(filtered_pairs)
+        # 根据 ratio_score 降序排序
+        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.5*randn()), rev = true)
+        scored_nodes = [p.first for p in sorted_pairs]
+    end
 
     result = Node[]
-
-    for i in 1:min(n, length(sorted_subtrees))
-        push!(result, sorted_subtrees[i][1])
+    # 先用得分最高的子树填充一部分
+    n_subtrees = min(floor(Int, n * ratio_subtrees), length(scored_nodes))
+    for i in 1:n_subtrees
+        push!(result, scored_nodes[i])
     end
 
+    # 获取已经使用的变量
+    variable_names = ["x$i" for i in 1:n_variables]
+    used_variables = Set{String}()
+    for node in result
+        union!(used_variables, get_used_variables(node, variable_names))
+    end
+    
+    # 获取还未使用的变量索引
+    available_features = Int[]
+    for i in 1:n_variables
+        if !("x$i" in used_variables)
+            push!(available_features, i)
+        end
+    end
+
+    # 如果还没凑够，就用随机生成的树来填充
     while length(result) < n
-        should_multiply = rand(Bool)
-        current_num = should_multiply ? rand(Float32) * ((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1) : ((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1)
-        is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
-        val = is_positive ? Float32(current_num) : Float32(-current_num)
-        push!(result, Node(; val=val))
+        # if isempty(available_features)
+            # 如果没有可用的feature了，就生成随机的树
+            # push!(result, Node(Float32; val=rand(-5:5)))
+        tree = gen_random_tree(
+            rand(1:4),                     # length
+            options,              # options
+            n_variables,          # nfeatures
+            Float32;
+            only_gen_bin_op=true,
+            only_gen_int_const=false,
+            feature_prob=0.7
+        )
+        push!(result, tree)
+        # else
+        #     # 随机选择一个未使用的feature
+        #     feature = rand(available_features)
+        #     tree = Node(Float32; feature=feature)
+            
+        #     if !(tree in result)
+        #         push!(result, tree)
+        #         # 更新已使用的变量
+        #         union!(used_variables, get_used_variables(tree, variable_names))
+        #         # 从可用feature中移除已使用的
+        #         filter!(f -> f != feature, available_features)
+        #     end
+        # end
     end
+
     return result
 end
 
@@ -915,7 +992,9 @@ function evaluate_subtrees(
                 end
             else
                 result[:, i] .= one(T)
-                @warn "eval_tree_array failed for subtree $i, using ones"
+                # @warn "eval_tree_array failed for subtree $i, using ones"
+                # @warn "where the failed tree is:"
+                # @warn "🔥 $(subtrees[i]) 🔥"
             end
         end
     end
@@ -924,40 +1003,81 @@ function evaluate_subtrees(
     return result
 end
 
-function analyze_common_subtrees(trees::Vector{<:Expression})
-    # TODO - This is obviously not efficient, but it works for now
+"""
+计算给定子树在所有表达式中的加权评分，即 sum( subtree_complexity / parent_complexity )。
+返回的字典结构为：
+    Dict{Node, Float64}
+其中键是子树节点，值是该子树节点所对应的打分。
+"""
+function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
+    # 为每个子树同时记录：
+    #   - 出现次数 count（若你还需要对出现次数进行筛选，可继续保留 count）
+    #   - 累加的占比得分 ratio_score
+    # 这里使用一个字典，值为 (count, ratio_score)
+    subtree_stats = Dict{Node, Tuple{Int, Float64}}()  # Correct
 
-    subtree_counts = Dict{Node,Int}()
+    for expr in trees
+        # 如果该表达式有树结构
+        if !isnothing(expr.tree)
+            parent_complexity = compute_complexity(expr.tree, options)
+            # 获取该表达式的所有子树
+            subtrees = get_subtrees(expr)
 
-    for tree in trees
-        if !isnothing(tree.tree)
-            subtrees = get_subtrees(tree)
-            for subtree in subtrees
-                subtree_counts[subtree] = get(subtree_counts, subtree, 0) + 1
+            for st in subtrees
+                st_comp = compute_complexity(st, options)
+                # 子树对于该表达式的贡献
+                contribution = st_comp / parent_complexity
+
+                if haskey(subtree_stats, st)
+                    old_count, old_ratio_score = subtree_stats[st]
+                    subtree_stats[st] = (old_count + 1, old_ratio_score + contribution)
+                else
+                    subtree_stats[st] = (1, contribution)
+                end
             end
         end
     end
 
-    threshold = length(trees) * 0.01 # TODO need to adjust this threshold in tghe future
-    common_patterns = filter(p -> p.second >= threshold, subtree_counts)
+    # 你所需的出现次数阈值（也可以只用 ratio_score 过滤）
+    threshold = 1
 
-    if !isempty(common_patterns)
-        # println("\nCommon subtree patterns:")
-        for (pattern, count) in common_patterns
-            # println("- $(string_tree(pattern)) (appeared $count times)")
-            # @info pattern
+    # 过滤掉出现次数太少或者复杂度过低的子树
+    # 如果您不想用 count 做过滤，可以只用 ratio_score 做过滤；这里仅示例
+    common_patterns = Dict{Node, Float64}()
+    for (st, (count, rscore)) in subtree_stats
+        if count >= threshold && compute_complexity(st, options) >= 1
+            # 将 ratio_score 作为我们后续排序使用的“全局打分”
+            common_patterns[st] = rscore
         end
     end
 
     return common_patterns
 end
 
+
 # Gets all the subtrees of an expression tree
+# function get_subtrees(expr::Expression)
+#     if isnothing(expr.tree)
+#         return Node[]
+#     end
+#     return get_subtrees(expr.tree)
+# end
+
+using Symbolics: expand, flatten_fractions, quick_cancel
+
 function get_subtrees(expr::Expression)
     if isnothing(expr.tree)
         return Node[]
     end
-    return get_subtrees(expr.tree)
+    expanded = expand(expr.tree)
+    flattend = flatten_fractions(expr.tree)
+    canceled = quick_cancel(expr.tree)
+    return vcat(
+        get_subtrees(expr.tree),
+        get_subtrees(expanded),
+        get_subtrees(flattend),
+        get_subtrees(canceled)
+        ) 
 end
 
 function get_subtrees(node::Node)
@@ -983,12 +1103,14 @@ end
 get_subtrees(x::Number) = Node[]
 get_subtrees(x::Symbol) = Node[]
 
+
 function start_psrn_task(
     manager::PSRNManager,
     dominating_trees::Vector{<:Expression},
     dataset::Dataset,
     options::AbstractOptions,
     N_PSRN_INPUT::Int,
+    n_variables::Int
 )
     if manager.current_task !== nothing && !istaskdone(manager.current_task)
         return nothing
@@ -999,8 +1121,9 @@ function start_psrn_task(
             manager.call_count += 1
             # @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
             
-            common_subtrees = analyze_common_subtrees(dominating_trees)
-            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
+            common_subtrees = analyze_common_subtrees(dominating_trees, options)
+            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
+            shuffle!(top_subtrees)
 
             @info "Selected subtrees:" top_subtrees
             @info "👇"
@@ -1236,6 +1359,9 @@ function _main_search_loop!(
             dataset = datasets[j]
             cur_maxsize = state.cur_maxsizes[j]
 
+            n_variables = size(dataset.X, 1)
+            n_samples = size(dataset.X, 2)
+            
             for member in cur_pop.members
                 size = compute_complexity(member, options)
                 update_frequencies!(state.all_running_search_statistics[j]; size)
@@ -1251,7 +1377,7 @@ function _main_search_loop!(
 
             if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
                 start_psrn_task(
-                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT
+                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
                 )
                 process_psrn_results!(
                     psrn_manager, state.halls_of_fame[j], dataset, options

@@ -1,7 +1,4 @@
-# export JULIA_NUM_THREADS=4
-# export JULIA_DEBUG=loading
-# julia --project=. example.jl
-# julia example.jl
+# julia -t 16 --project=. example2.jl
 
 using SymbolicRegression
 using LoopVectorization

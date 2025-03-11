@@ -1002,12 +1002,12 @@ function start_psrn_task(
             common_subtrees = analyze_common_subtrees(dominating_trees)
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options)
 
-            # @info "Selected subtrees:" top_subtrees
-            # @info "👇"
-            # for expr in top_subtrees
-            #     @info expr
-            # end 
-            # @info "👆"
+            @info "Selected subtrees:" top_subtrees
+            @info "👇"
+            for expr in top_subtrees
+                @info expr
+            end 
+            @info "👆"
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 

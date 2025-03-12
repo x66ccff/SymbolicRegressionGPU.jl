@@ -1331,7 +1331,7 @@ function _main_search_loop!(
         println("Use PSRN")
         # N_PSRN_INPUT = 15
         # N_PSRN_INPUT = 5 # TODO this can be tuned
-        N_PSRN_INPUT = 20 # TODO this can be tuned
+        N_PSRN_INPUT = 5 # TODO this can be tuned
 
 
         psrn_manager = PSRNManager(;
@@ -1342,7 +1342,7 @@ function _main_search_loop!(
             # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
             # operators = ["Add", "Mul", "Identity"],
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
-            n_symbol_layers=2, # TODO if use 3 layer, easily crash (segfault), don't know why
+            n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
             options=options
         )
     else
@@ -1501,18 +1501,18 @@ function _main_search_loop!(
                 options, total_cycles, cycles_remaining=state.cycles_remaining[j]
             )
             move_window!(state.all_running_search_statistics[j])
-            # if !isnothing(progress_bar)
-            #     head_node_occupation = estimate_work_fraction(resource_monitor)
-            #     update_progress_bar!(
-            #         progress_bar,
-            #         only(state.halls_of_fame),
-            #         only(datasets),
-            #         options,
-            #         equation_speed,
-            #         head_node_occupation,
-            #         ropt.parallelism,
-            #     )
-            # end
+            if !isnothing(progress_bar)
+                head_node_occupation = estimate_work_fraction(resource_monitor)
+                update_progress_bar!(
+                    progress_bar,
+                    only(state.halls_of_fame),
+                    only(datasets),
+                    options,
+                    equation_speed,
+                    head_node_occupation,
+                    ropt.parallelism,
+                )
+            end
             if ropt.logger !== nothing
                 logging_callback!(ropt.logger; state, datasets, ropt, options)
             end

@@ -390,7 +390,7 @@ mutable struct PSRN
         @info "⏳compiling PSRN.diff_compiled..."
         d(a,b) = a .- b
         x = rand(T_kernel_compiling, 1, layers[end].out_dim)
-        
+
         y::T_kernel_compiling = 666.666
         xr = Reactant.to_rarray(x)
 
@@ -465,29 +465,42 @@ function get_best_expr_and_MSE_topk(
     sum_squared_errors = zeros(T_kernel_compiling, 1, model.out_dim)
     sum_squared_errors_R = Reactant.to_rarray(sum_squared_errors)
 
-    @info "forwarding time:"
-    @time for i in 1:batch_size
+    @info "GC.......🧹"
+    GC.gc()
+    @info "GC sucess🧹"
+
+    for i in 1:batch_size
         x_sliced = X[i:i, :]
         HR = PSRN_forward(model, x_sliced)
         diffR = model.diff_compiled(HR, Y[i])
         sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR)
+        @info "GC.......🧹"
+        GC.gc()
+        @info "GC sucess🧹"
     end
 
-    @info "fill nan time:"
-    @time sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
+    sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
                                         sum_squared_errors_R,
                                         model.f_fill(similar(sum_squared_errors_R), 1f9))
 
     mean_errors_R = sum_squared_errors_R
 
     val_R, idx_R = model.top_k_compiled(-mean_errors_R, model.PSRN_topk)
-    indices = vec(convert(Matrix, idx_R))
 
-    @info "Best Expressions:"
+    @info "idx_R:"
+    @time @info idx_R
+
+    @info "🤓convert time:"
+    @time indices = vec(convert(Matrix, idx_R))
+
+    # @info "val_R: $val_R"
+
     expr_best_ls = Expression[]
     for i in indices
         expr = get_expr(model, Int64(i))
         push!(expr_best_ls, expr)
+
+        # @info "idx: $i, expr: $expr"
     end
 
     @info "GC.......🧹"

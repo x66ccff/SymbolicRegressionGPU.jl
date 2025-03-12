@@ -2,7 +2,7 @@
 # export JULIA_DEBUG=loading
 # julia --project=. example.jl
 # julia example.jl
-# export XLA_REACTANT_GPU_MEM_FRACTION=0.9
+# export XLA_REACTANT_GPU_MEM_FRACTION=0.99
 # julia -t 16 --project=. example3.jl    
 
 using SymbolicRegression

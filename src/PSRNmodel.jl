@@ -533,14 +533,20 @@ function get_best_expr_and_MSE_topk(
         model.diff_compiled(HR, Y[i])
         model.inplace_square_compiled(HR)
         model.inplace_add_compiled(sum_squared_errors_R, HR)
-    end
 
-    sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
-                                        sum_squared_errors_R,
-                                        model.all_M_R)
-    model.inplace_neg_compiled(sum_squared_errors_R)
-    val_R, idx_R = model.top_k_compiled(sum_squared_errors_R,
-                                             model.PSRN_topk)
+        @info "GC.......🧹"
+        @time GC.gc()
+        @info "GC sucess🧹"
+    end
+    Reactant.with_profiler("./"; create_perfetto_link=true) do
+        sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
+                                            sum_squared_errors_R,
+                                            model.all_M_R)
+        model.inplace_neg_compiled(sum_squared_errors_R)
+        val_R, idx_R = model.top_k_compiled(sum_squared_errors_R,
+                                                model.PSRN_topk)
+
+    end
     indices = vec(convert(Matrix, idx_R))
 
     expr_best_ls = Expression[]
@@ -549,9 +555,9 @@ function get_best_expr_and_MSE_topk(
         push!(expr_best_ls, expr)
     end
 
-    # @info "GC.......🧹"
-    # @time GC.gc()
-    # @info "GC sucess🧹"
+    @info "GC.......🧹"
+    @time GC.gc()
+    @info "GC sucess🧹"
 
     return expr_best_ls
 end

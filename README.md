@@ -31,8 +31,7 @@ julia> ]
 ```
 ### 🏃‍♂️ Run 
 ```
-export JULIA_NUM_THREADS=4    # allow @spawn for starting PSRN task
-
+export XLA_REACTANT_GPU_MEM_FRACTION=0.99
 julia -t 16 --project=. example.jl
 ```
 

@@ -133,7 +133,7 @@ mutable struct DRLayer
     end
 end
 
-function forward(layer::DRLayer, x::AbstractMatrix, HR::ConcreteRArray)
+function forward(layer::DRLayer, x::AbstractMatrix)
     return x[:, layer.dr_mask]
 end
 
@@ -157,8 +157,6 @@ mutable struct SymbolLayer
     triu_idx::Union{ConcreteRArray{T_kernel_compiling_idx, 2},Nothing}
     squared_idx::Union{ConcreteRArray{T_kernel_compiling_idx, 2},Nothing}
     hcat_compiled::Union{CompiledKernel, Nothing}
-    donate::Union{CompiledKernel, Nothing}
-    # hcat_compiled::CompiledKernel
 
     function SymbolLayer(in_dim::Int, operator_names::Vector{String})
         n_binary_U = 0
@@ -303,11 +301,10 @@ function get_op_and_offset(layer::SymbolLayer, index::Int)
     return layer.operator_list[op_idx], offset
 end
 
-function forward(layer::SymbolLayer, xr::Reactant.ConcreteRArray, HR::ConcreteRArray)
+function forward(layer::SymbolLayer, xr::Reactant.ConcreteRArray)
     n = layer.in_dim
     results = Reactant.ConcreteRArray{T_kernel_compiling}[]
     for op in layer.operator_list
-        # print("🈲🈲🈲 $(op.name)")
         if isa(op, UnaryOperator)
             res = op.compiled_kernel(xr)
         elseif isa(op, BinaryTriuOperator)
@@ -319,9 +316,6 @@ function forward(layer::SymbolLayer, xr::Reactant.ConcreteRArray, HR::ConcreteRA
         end
         push!(results, res)
     end
-
-    # 这一步是瞬时的，不耗时，任何层都是
-
     if layer.hcat_compiled == nothing
         # compile the hcat
         xr_ls = [Reactant.to_rarray(ones(T_kernel_compiling, 1, get_scale(op, layer.in_dim))) for op in layer.operator_list]
@@ -329,24 +323,7 @@ function forward(layer::SymbolLayer, xr::Reactant.ConcreteRArray, HR::ConcreteRA
         layer.hcat_compiled = @compile hcat(xr_ls...)
         @info "hcat compiled!"
     end
-    ret = layer.hcat_compiled(results...) 
-
-    if size(HR)[1] != layer.out_dim
-        return ret
-    else 
-        if layer.donate == nothing
-            function donate(x,y)
-                x .= y 
-                return nothing
-            end 
-            @info "⏳compiling donate..."
-            layer.donate = @compile donate(HR, ret)
-            @info "donate compiled!"
-        end 
-        layer.donate(HR, ret)
-        ret = nothing
-        return nothing
-    end
+    return layer.hcat_compiled(results...)
 end
 
 function compile_kernels!(layer::SymbolLayer)
@@ -378,15 +355,11 @@ mutable struct PSRN
     options::Options
     PSRN_topk::Int
     diff_compiled::CompiledKernel
-    inplace_add_compiled::CompiledKernel
-    inplace_square_compiled::CompiledKernel
+    sum_squared_add_compiled::CompiledKernel
     top_k_compiled::CompiledKernel
     f_select::CompiledKernel
     f_is_finite::CompiledKernel
-    # f_fill::CompiledKernel
-    inplace_neg_compiled::CompiledKernel
-    all_M_R::ConcreteRArray
-    donate_compiled::CompiledKernel
+    f_fill::CompiledKernel
 
     function PSRN(;
         n_variables::Int,
@@ -415,38 +388,28 @@ mutable struct PSRN
         end
 
         @info "⏳compiling PSRN.diff_compiled..."
-        function d(a,b)
-            a .-= b 
-            return nothing
-        end
+        d(a,b) = a .- b
         x = rand(T_kernel_compiling, 1, layers[end].out_dim)
+        
         y::T_kernel_compiling = 666.666
         xr = Reactant.to_rarray(x)
+
         diff_compiled = @compile d(xr,y)
         @info "👌compiling success!"
 
-        @info "⏳compiling PSRN.inplace_add_compiled..."
-        function inplace_add(a,b)
-            a .+= b
-            return nothing
-        end
+        @info "⏳compiling PSRN.sum_squared_add_compiled..."
+        sum_squared_add(s,d) = s .+ d.^2
         x1 = ones(T_kernel_compiling, 1, layers[end].out_dim)
+        x2 = ones(T_kernel_compiling, 1, layers[end].out_dim)
         x1r = Reactant.to_rarray(x1)
-        x2r = Reactant.to_rarray(x1)
-        inplace_add_compiled = @compile inplace_add(x1r, x2r)
-        @info "👌compiling success!"
-
-        @info "⏳compiling PSRN.inplace_square_compiled..."
-        function inplace_square(a)
-            a .*= a
-            return nothing
-        end
-        inplace_square_compiled = @compile inplace_square(x1r)
+        x2r = Reactant.to_rarray(x2)
+        sum_squared_add_compiled = @compile sum_squared_add(x1r, x2r)
         @info "👌compiling success!"
 
         # https://github.com/EnzymeAD/Reactant.jl/issues/485
         @info "⏳compiling PSRN.top_k_compiled..."
-        x3r = Reactant.to_rarray(x1)
+        x3 = ones(T_kernel_compiling, 1, layers[end].out_dim)
+        x3r = Reactant.to_rarray(x3)
         top_k_compiled = @compile Reactant.Ops.top_k(x3r, PSRN_topk)
         @info "👌compiling success!"
 
@@ -458,26 +421,9 @@ mutable struct PSRN
         x4r = Reactant.to_rarray(x4)
 
         f_is_finite = @compile Reactant.Ops.is_finite(x4r)
-        xM = ones(T_kernel_compiling, 1, layers[end].out_dim) * M
-        all_M_R = Reactant.to_rarray(xM)
-        f_select = @compile Reactant.Ops.select(f_is_finite(x4r), x4r, all_M_R)
-        @info "👌compiling success!"
-
-        @info "⏳compiling donate..."
-        function donate(x,y)
-            x .= y 
-            return nothing
-        end
-        donate_compiled = @compile donate(x1r, x4r)
-        @info "👌compiling success!"
-
-        function inplace_neg(x)
-            x .*= -1
-            return nothing
-        end
-
-        inplace_neg_compiled = @compile inplace_neg(x1r)
-
+        f_fill = @compile fill!(similar(x4r), M)
+        f_select = @compile Reactant.Ops.select(f_is_finite(x4r), x4r, f_fill(similar(x4r), M))
+        
         @info "👌compiling success!"
 
         return new(
@@ -491,25 +437,22 @@ mutable struct PSRN
             options,
             PSRN_topk,
             diff_compiled,
-            inplace_add_compiled,
-            inplace_square_compiled,
+            sum_squared_add_compiled,
             top_k_compiled,
             f_select,
             f_is_finite,
-            # f_fill,
-            inplace_neg_compiled,
-            all_M_R,
-            donate_compiled
+            f_fill
         )
     end
 end
 
-function PSRN_forward(model::PSRN, x::AbstractMatrix, HR::ConcreteRArray)
+function PSRN_forward(model::PSRN, x::AbstractMatrix)
     h = x
     h = ConcreteRArray(h)
     for (i, layer) in enumerate(model.layers)
-        h = forward(layer, h, HR)
+        h = forward(layer, h)
     end
+    return h
 end
 
 function get_best_expr_and_MSE_topk(
@@ -517,38 +460,30 @@ function get_best_expr_and_MSE_topk(
     X::AbstractMatrix,
     Y::Vector{T_kernel_compiling}
 )
-
     batch_size = size(X, 1)
     Y = T_kernel_compiling.(Y)
+    sum_squared_errors = zeros(T_kernel_compiling, 1, model.out_dim)
+    sum_squared_errors_R = Reactant.to_rarray(sum_squared_errors)
 
-    zeros_R = zeros(T_kernel_compiling, 1, model.out_dim)
-    sum_squared_errors_R = Reactant.to_rarray(zeros_R)
-
-    HR = Reactant.to_rarray(zeros_R)
-
-    for i in 1:batch_size
+    @info "forwarding time:"
+    @time for i in 1:batch_size
         x_sliced = X[i:i, :]
-
-        PSRN_forward(model, x_sliced, HR)
-        model.diff_compiled(HR, Y[i])
-        model.inplace_square_compiled(HR)
-        model.inplace_add_compiled(sum_squared_errors_R, HR)
-
-        @info "GC.......🧹"
-        @time GC.gc()
-        @info "GC sucess🧹"
+        HR = PSRN_forward(model, x_sliced)
+        diffR = model.diff_compiled(HR, Y[i])
+        sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR)
     end
-    Reactant.with_profiler("./"; create_perfetto_link=true) do
-        sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
-                                            sum_squared_errors_R,
-                                            model.all_M_R)
-        model.inplace_neg_compiled(sum_squared_errors_R)
-        val_R, idx_R = model.top_k_compiled(sum_squared_errors_R,
-                                                model.PSRN_topk)
 
-    end
+    @info "fill nan time:"
+    @time sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),
+                                        sum_squared_errors_R,
+                                        model.f_fill(similar(sum_squared_errors_R), 1f9))
+
+    mean_errors_R = sum_squared_errors_R
+
+    val_R, idx_R = model.top_k_compiled(-mean_errors_R, model.PSRN_topk)
     indices = vec(convert(Matrix, idx_R))
 
+    @info "Best Expressions:"
     expr_best_ls = Expression[]
     for i in indices
         expr = get_expr(model, Int64(i))
@@ -556,7 +491,7 @@ function get_best_expr_and_MSE_topk(
     end
 
     @info "GC.......🧹"
-    @time GC.gc()
+    GC.gc()
     @info "GC sucess🧹"
 
     return expr_best_ls

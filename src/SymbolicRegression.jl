@@ -1164,26 +1164,27 @@ function start_psrn_task(
     n_variables::Int
 )
     if manager.current_task !== nothing && !istaskdone(manager.current_task)
-        @info "💩PSRN task is still running, skipping this round"
+        # @info "💩PSRN task is still running, skipping this round"
         return nothing
     end
 
     return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
-        @info "🚀return manager.current_task = Threads.@spawn begin"
+        # @info "🚀return manager.current_task = Threads.@spawn begin"
         try
             manager.call_count += 1
             # @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
-            
+            @info "✅Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
+
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
             shuffle!(top_subtrees)
 
-            @info "Selected subtrees:" top_subtrees
-            @info "👇"
-            for expr in top_subtrees
-                @info expr
-            end 
-            @info "👆"
+            # @info "Selected subtrees:" top_subtrees
+            # @info "👇"
+            # for expr in top_subtrees
+            #     @info expr
+            # end 
+            # @info "👆"
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
@@ -1335,7 +1336,7 @@ function _main_search_loop!(
         println("Use PSRN")
         # N_PSRN_INPUT = 15
         # N_PSRN_INPUT = 5 # TODO this can be tuned
-        N_PSRN_INPUT = 5 # TODO this can be tuned
+        N_PSRN_INPUT = 4 # TODO this can be tuned
 
 
         psrn_manager = PSRNManager(;
@@ -1396,7 +1397,7 @@ function _main_search_loop!(
         # TODO - this might skip extra cycles?
         population_ready &= (state.cycles_remaining[j] > 0)
         if population_ready
-            @info "⏰state.cycles_remaining = $(state.cycles_remaining), j = $j, i = $i"
+            # @info "⏰state.cycles_remaining = $(state.cycles_remaining), j = $j, i = $i"
             # Take the fetch operation from the channel since its ready
             (cur_pop, best_seen, cur_record, cur_num_evals) = if ropt.parallelism in
                 (

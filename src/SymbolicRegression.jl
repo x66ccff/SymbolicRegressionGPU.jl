@@ -1164,10 +1164,12 @@ function start_psrn_task(
     n_variables::Int
 )
     if manager.current_task !== nothing && !istaskdone(manager.current_task)
+        @info "💩PSRN task is still running, skipping this round"
         return nothing
     end
 
     return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
+        @info "🚀return manager.current_task = Threads.@spawn begin"
         try
             manager.call_count += 1
             # @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
@@ -1296,7 +1298,9 @@ function process_psrn_results!(
             end
             @info "✅Added PSRN results to hall of fame"
         end
+        @info "✅process_psrn_results OK!"
     end
+    
 end
 
 function _main_search_loop!(
@@ -1392,6 +1396,7 @@ function _main_search_loop!(
         # TODO - this might skip extra cycles?
         population_ready &= (state.cycles_remaining[j] > 0)
         if population_ready
+            @info "⏰state.cycles_remaining = $(state.cycles_remaining), j = $j, i = $i"
             # Take the fetch operation from the channel since its ready
             (cur_pop, best_seen, cur_record, cur_num_evals) = if ropt.parallelism in
                 (

@@ -166,11 +166,23 @@ using DynamicExpressions: with_type_parameters
     LogCoshLoss
 using DynamicDiff: D
 using Compat: @compat, Fix
-
-# using Reactant: get_memory_allocated_gb, print_largest_arrays
-# https://github.com/x66ccff/Reactant.jl
-# https://github.com/EnzymeAD/Reactant.jl/pull/515
-
+using CUDA
+using LinearAlgebra # Needed for PSRN hcat
+if !CUDA.functional()
+    @warn """
+    CUDA.jl is not functional.
+    Ensure you have a NVIDIA GPU and compatible drivers installed.
+    PSRN GPU acceleration will be disabled.
+    Set `options.populations <= 3` (or adjust threshold) to avoid PSRN attempts.
+    """
+    # Define placeholder types/functions if CUDA is not functional
+    # This prevents errors later if PSRN parts are called conditionally.
+    struct PSRNManager end
+    start_psrn_task(args...) = nothing
+    process_psrn_results!(args...) = nothing
+    struct PSRN end # Placeholder
+    const T_GPU = Float32 # Define a default CPU type
+end
 #! format: off
 @compat(
     public,
@@ -334,7 +346,12 @@ using .TemplateExpressionModule: TemplateExpression, TemplateStructure, ValidVec
 using .ComposableExpressionModule: ComposableExpression
 using .ExpressionBuilderModule: embed_metadata, strip_metadata
 
-import .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk
+import .PSRNmodel
+# Import PSRN components only if CUDA is functional
+if CUDA.functional()
+    using .PSRNmodel: PSRN, forward, get_expr, get_best_expr_and_MSE_topk, T_GPU, OPERATORS as PSRN_OPERATORS # Alias PSRN's OPERATORS
+end
+import .PSRNmodel # To qualify PSRNManager constructor if needed
 
 @stable default_mode = "disable" begin
     include("deprecates.jl")
@@ -465,6 +482,8 @@ function equation_search(
     progress::Union{Bool,Nothing}=nothing,
     X_units::Union{AbstractVector,Nothing}=nothing,
     y_units=nothing,
+    enable_psrn::Bool = true, # Default PSRN on
+    psrn_options::NamedTuple = NamedTuple(), # PSRN config
     extra::NamedTuple=NamedTuple(),
     v_dim_out::Val{DIM_OUT}=Val(nothing),
     # Deprecated:
@@ -476,6 +495,26 @@ function equation_search(
             "Choose one of :multithreaded, :multiprocessing, or :serial.",
         )
     end
+
+
+    # --- PSRN Activation Check ---
+    use_psrn = true
+    psrn_min_pop_threshold = 4 # Example threshold
+    if enable_psrn
+        if !CUDA.functional()
+            @warn "PSRN requested (`enable_psrn=true`) but CUDA is not functional. PSRN will be disabled."
+        elseif options.populations < psrn_min_pop_threshold
+            @warn "PSRN requested (`enable_psrn=true`) but number of populations ($(options.populations)) is less than threshold ($psrn_min_pop_threshold). PSRN will be disabled for efficiency."
+        else
+            @info "PSRN GPU acceleration is enabled."
+            use_psrn = true
+        end
+    end
+    # Pass use_psrn and psrn_options down
+    # Combine with existing extra NamedTuple
+    extended_extra = merge(extra, (use_psrn=use_psrn, psrn_options=psrn_options))
+    # --- End PSRN Check ---
+
 
     if weights !== nothing
         @assert length(weights) == length(y)
@@ -491,7 +530,7 @@ function equation_search(
         y_variable_names,
         X_units,
         y_units,
-        extra,
+        extended_extra,
         L,
     )
 
@@ -548,17 +587,104 @@ function equation_search(
     return _equation_search(datasets, _runtime_options, options, saved_state)
 end
 
+# Core equation search implementation (internal)
 @noinline function _equation_search(
-    datasets::Vector{D}, ropt::AbstractRuntimeOptions, options::AbstractOptions, saved_state
+    datasets::Vector{D},
+    ropt::AbstractRuntimeOptions, # Now contains niterations
+    options::AbstractOptions,
+    saved_state
 ) where {D<:Dataset}
+   # Extract PSRN flags from the first dataset (assume consistent across datasets)
+   # These were added in the main equation_search call
+   d1_extra = isempty(datasets) ? NamedTuple() : datasets[1].extra
+   use_psrn = get(d1_extra, :use_psrn, false)
+   psrn_opts_from_extra = get(d1_extra, :psrn_options, NamedTuple())
     _validate_options(datasets, ropt, options)
     state = _create_workers(datasets, ropt, options)
+
+    # Initialize PSRN manager if enabled
+    local psrn_manager::Union{PSRNManager, Nothing} = nothing # Type annotation
+    if use_psrn
+        psrn_manager = _initialize_psrn_manager(options, d1_extra, psrn_opts_from_extra)
+    end
+
     _initialize_search!(state, datasets, ropt, options, saved_state)
     _warmup_search!(state, datasets, ropt, options)
-    _main_search_loop!(state, datasets, ropt, options)
+    @info "Entering main loop: use_psrn = $use_psrn, psrn_manager type = $(typeof(psrn_manager))"
+    _main_search_loop!(state, datasets, ropt, options, use_psrn, psrn_manager)
     _tear_down!(state, ropt, options)
     _info_dump(state, datasets, ropt, options)
     return _format_output(state, datasets, ropt, options)
+end
+
+
+
+# --- Helper Functions for Search ---
+
+# (Keep _validate_options as is, or add PSRN validation inside)
+
+# Function to initialize PSRN Manager (called conditionally)
+function _initialize_psrn_manager(options::Options, extra::NamedTuple, psrn_options::NamedTuple)
+    # This function encapsulates the logic for setting up PSRNManager
+    # based on merged options from AbstractOptions and psrn_options NamedTuple.
+
+    if !CUDA.functional()
+        error("CUDA not functional, cannot initialize PSRN Manager.")
+    end
+
+    @info "Initializing PSRN Manager..."
+    # --- Extract PSRN Configuration ---
+    # Defaults can be set here or within PSRNManager constructor
+    psrn_n_layers = get(psrn_options, :n_layers, 2)
+    psrn_topk = get(psrn_options, :topk, 50)
+    psrn_max_samples = get(psrn_options, :max_samples, 1000)
+    psrn_device_id = get(psrn_options, :device_id, 0)
+    n_psrn_input = get(psrn_options, :n_input_features, 15) # Default N_PSRN_INPUT
+
+    # Determine Operators for PSRN
+    default_psrn_ops = ["Add", "Mul", "Sub", "Div", "Identity", "Sqrt"]
+    # Filter SR operators based on names supported by PSRN
+    supported_psrn_names = Set(keys(PSRN_OPERATORS)) # From PSRNmodel
+    derived_ops = String[]
+    # Assumes options.operators.binops/unaops exists and elements can be stringified
+    try
+        for op in options.operators.binops
+            op_str = string(op) # Fragile conversion
+            if op_str in supported_psrn_names push!(derived_ops, op_str) end
+        end
+        for op in options.operators.unaops
+            op_str = string(op)
+            if op_str in supported_psrn_names push!(derived_ops, op_str) end
+        end
+    catch e
+        @warn "Could not derive PSRN operators from SR options. Using defaults." error=e
+        derived_ops = default_psrn_ops
+    end
+
+    psrn_op_names = get(psrn_options, :operators, isempty(derived_ops) ? default_psrn_ops : derived_ops)
+
+    @info """
+    PSRN Configuration:
+      Input Features (Subtrees): $n_psrn_input
+      Operators: $psrn_op_names
+      Symbol Layers: $psrn_n_layers
+      Top-K Return: $psrn_topk
+      Max Samples per Call: $psrn_max_samples
+      GPU Device ID: $psrn_device_id
+    """
+
+    # --- Create PSRNManager Instance ---
+    manager = PSRNManager(;
+        N_PSRN_INPUT=n_psrn_input,
+        operators=psrn_op_names,
+        n_symbol_layers=psrn_n_layers,
+        options=options, # Pass SR options for context
+        max_samples=psrn_max_samples,
+        PSRN_topk=psrn_topk,
+        device_id=psrn_device_id
+    )
+    # @info "PSRN Manager initialized successfully." # Already logged inside constructor
+    return manager
 end
 
 function _validate_options(
@@ -802,41 +928,74 @@ function _warmup_search!(
     end
     return nothing
 end
+# Define PSRNManager struct conditionally
+if CUDA.functional()
+    mutable struct PSRNManager
+        channel::Channel{Vector{Expression}}
+        current_task::Union{Task,Nothing}
+        call_count::Int
+        N_PSRN_INPUT::Int # Number of features PSRN expects (evaluated subtrees)
+        net::PSRN # PSRN model instance from PSRNmodel.jl
+        max_samples::Int # Max samples to use for PSRN training/evaluation per call
+        PSRN_topk::Int # How many top expressions to request from PSRN
+        device_id::Int # Which GPU device to use
 
-mutable struct PSRNManager
-    channel::Channel{Vector{Expression}}
-    current_task::Union{Task,Nothing}
-    call_count::Int
-    N_PSRN_INPUT::Int
-    net::PSRN
-    max_samples::Int
-    PSRN_topk::Int
-
-    function PSRNManager(;
-        N_PSRN_INPUT::Int,
-        operators::Vector{String},
-        n_symbol_layers::Int,
-        options::Options,
-        max_samples::Int=10, # kk TODO number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
-        PSRN_topk::Int=50,
-        # PSRN_topk::Int=300,
-
-    )
-        psrn = PSRN(;
-            n_variables=N_PSRN_INPUT,
-            operators=operators,
-            n_symbol_layers=n_symbol_layers,
-            dr_mask=nothing,
-            options=options,
-            PSRN_topk=PSRN_topk
+        function PSRNManager(;
+            N_PSRN_INPUT::Int,
+            operators::Vector{String}, # Operator names PSRN should use
+            n_symbol_layers::Int,
+            options::Options, # Pass SR options for context
+            max_samples::Int=1000,
+            PSRN_topk::Int=50,
+            device_id::Int = 0 # Default to GPU 0
         )
+            # Check CUDA availability before initializing PSRN
+            if !CUDA.functional()
+                error("Cannot initialize PSRNManager: CUDA is not functional.")
+            end
 
-        return new(
-            Channel{Vector{Expression}}(1000), nothing, 0, N_PSRN_INPUT, psrn, max_samples
-        )
+            # Set the device for initialization
+            try
+                CUDA.device!(device_id)
+                current_dev = CUDA.device()
+                @info "Initializing PSRNManager on CUDA device $(current_dev)..."
+            catch e
+                @error "Failed to set CUDA device to $device_id during PSRNManager initialization." exception=(e, catch_backtrace())
+                rethrow(e)
+            end
+
+            # Initialize the PSRN network (defined in PSRNmodel.jl)
+            psrn_net = PSRN(;
+                n_variables=N_PSRN_INPUT, # Should match the number of evaluated subtrees
+                operators=operators,      # Operators PSRN internal layers will use
+                n_symbol_layers=n_symbol_layers,
+                dr_mask=nothing,          # Dimensionality reduction mask (optional)
+                options=options,          # Pass SR options to PSRN if needed
+                PSRN_topk=PSRN_topk       # Pass top-k parameter
+            )
+            @info "PSRN network initialized."
+
+            return new(
+                Channel{Vector{Expression}}(1000), # Channel buffer size
+                nothing, # No task running initially
+                0,       # Call count starts at 0
+                N_PSRN_INPUT,
+                psrn_net,
+                max_samples,
+                PSRN_topk,
+                device_id
+            )
+        end
     end
+else
+    # If CUDA not functional, PSRNManager is just a placeholder defined earlier
+    # We still need a definition to avoid UndefVarError if used conditionally later
+    # The placeholder struct PSRNManager was defined near the top in Step 1
+    # Alternatively, define it here if not done earlier:
+    # if !isdefined(@__MODULE__, :PSRNManager)
+    #     struct PSRNManager end
+    # end
 end
-
 
 function get_used_variables(node, var_names)
     used_vars = Set{String}()
@@ -861,44 +1020,6 @@ function get_used_variables(node, var_names)
     traverse(node)
     return used_vars
 end
-
-# function select_top_subtrees(
-#     common_subtrees::Dict{Node,Int},
-#     n::Int,
-#     options::AbstractOptions,
-#     n_variables::Int;
-#     ratio_subtrees::Float64=0.5,
-#     ratio_subtrees_crossover::Float64=0.4
-# )
-
-#     filtered_subtrees = filter(
-#         pair -> begin
-#             node = pair.first
-#             complexity = compute_complexity(node, options)
-#             return complexity <= 20 # TODO the 20 can be tuned
-#         end, common_subtrees
-#     )
-
-#     sorted_subtrees = sort(
-#         collect(filtered_subtrees); by=x -> (x[2] * (1.0 + 0.5 * randn())), rev=true
-#     ) # TODO the 0.3 can be tuned
-
-#     result = Node[]
-
-#     for i in 1:min(n, length(sorted_subtrees))
-#         push!(result, sorted_subtrees[i][1])
-#     end
-
-#     while length(result) < n
-#         should_multiply = rand(Bool)
-#         current_num = should_multiply ? rand(Float32) * ((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1) : ((length(result) - length(sorted_subtrees) + 1) ÷ 2 + 1)
-#         is_positive = (length(result) - length(sorted_subtrees)) % 2 == 0
-#         val = is_positive ? Float32(current_num) : Float32(-current_num)
-#         push!(result, Node(; val=val))
-#     end
-#     return result
-# end
-
 
 function select_top_subtrees(
     common_subtrees::Dict{Node,Float64},
@@ -961,7 +1082,7 @@ function select_top_subtrees(
             n_variables,          # nfeatures
             Float32;
             only_gen_bin_op=true,
-            only_gen_int_const=true,
+            only_gen_int_const=false,
             feature_prob=0.7
         )
         push!(result, tree)
@@ -1030,7 +1151,9 @@ function evaluate_subtrees(
                 end
             else
                 result[:, i] .= one(T)
-                @warn "eval_tree_array failed for subtree $i, using ones"
+                # @warn "eval_tree_array failed for subtree $i, using ones"
+                # @warn "where the failed tree is:"
+                # @warn "🔥 $(subtrees[i]) 🔥"
             end
         end
     end
@@ -1039,35 +1162,12 @@ function evaluate_subtrees(
     return result
 end
 
-
-
-# function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
-
-#     subtree_counts = Dict{Node,Int}()
-
-#     for tree in trees
-#         if !isnothing(tree.tree)
-#             subtrees = get_subtrees(tree)
-#             for subtree in subtrees
-#                 subtree_counts[subtree] = get(subtree_counts, subtree, 0) + 1
-#             end
-#         end
-#     end
-
-#     threshold = length(trees) * 0.01 # TODO need to adjust this threshold in tghe future
-#     common_patterns = filter(p -> p.second >= threshold, subtree_counts)
-
-#     if !isempty(common_patterns)
-#         # println("\nCommon subtree patterns:")
-#         for (pattern, count) in common_patterns
-#             # println("- $(string_tree(pattern)) (appeared $count times)")
-#             # @info pattern
-#         end
-#     end
-
-#     return common_patterns
-# end
-
+"""
+计算给定子树在所有表达式中的加权评分，即 sum( subtree_complexity / parent_complexity )。
+返回的字典结构为：
+    Dict{Node, Float64}
+其中键是子树节点，值是该子树节点所对应的打分。
+"""
 function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
     # 为每个子树同时记录：
     #   - 出现次数 count（若你还需要对出现次数进行筛选，可继续保留 count）
@@ -1114,6 +1214,14 @@ function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
 end
 
 
+# Gets all the subtrees of an expression tree
+# function get_subtrees(expr::Expression)
+#     if isnothing(expr.tree)
+#         return Node[]
+#     end
+#     return get_subtrees(expr.tree)
+# end
+
 using Symbolics: expand, flatten_fractions, quick_cancel
 
 function get_subtrees(expr::Expression)
@@ -1155,161 +1263,265 @@ get_subtrees(x::Number) = Node[]
 get_subtrees(x::Symbol) = Node[]
 
 
+
+
 function start_psrn_task(
     manager::PSRNManager,
-    dominating_trees::Vector{<:Expression},
-    dataset::Dataset,
+    dominating_trees::Vector{<:Expression}, # Trees from Hall of Fame
+    dataset::Dataset{T, L}, # Original dataset
     options::AbstractOptions,
-    N_PSRN_INPUT::Int,
-    n_variables::Int
-)
+    # N_PSRN_INPUT and n_variables passed explicitly for clarity
+    N_PSRN_INPUT::Int, # How many features PSRN expects (from manager is fine too)
+    n_variables::Int   # Number of original features in dataset.X
+) where {T, L}
+
+    # --- Pre-checks ---
+    if !CUDA.functional() || !(manager isa PSRNManager)
+         # @warn "CUDA not functional or PSRNManager not initialized, skipping PSRN task."
+         return nothing # Silently skip if not functional
+    end
     if manager.current_task !== nothing && !istaskdone(manager.current_task)
-        # @info "💩PSRN task is still running, skipping this round"
+        # Task already running
         return nothing
     end
+     if isempty(dominating_trees)
+         @info "No dominating trees found, skipping PSRN task."
+         return nothing
+     end
 
-    return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
-        # @info "🚀return manager.current_task = Threads.@spawn begin"
+    # --- Prepare Task ---
+    device_id = manager.device_id # Use device specified in manager
+
+    # Spawn a new thread/task for the PSRN computation
+    return manager.current_task = Threads.@spawn begin
+        @info "[PSRN Task START] Task spawned for manager call #$(manager.call_count)"
+        task_start_time = time()
+        final_status = "unknown"
+        best_expressions = Expression[] # Default empty result
+
         try
+            # --- Setup Environment in Task ---
+            CUDA.device!(device_id) # Ensure this task uses the correct GPU
             manager.call_count += 1
-            # @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
-            @info "✅Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
+            current_device = CUDA.device()
+            task_id = Threads.threadid() # Get thread ID for logging
+            @info "✅ [Dev:$current_device Task:$task_id] Starting PSRN computation #$(manager.call_count)"
+            # Optional: Log initial GPU memory
+            # @info "[Dev:$current_device] Initial GPU Memory: $(CUDA.memory_status())"
 
+            # --- Feature Engineering (CPU) ---
+            # 1. Analyze common subtrees from HoF
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
-            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
-            shuffle!(top_subtrees)
 
-            # @info "Selected subtrees:" top_subtrees
-            # @info "👇"
-            # for expr in top_subtrees
-            #     @info expr
-            # end 
-            # @info "👆"
-
-            X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-
-            # add downsampling 
-            n_samples = size(X_mapped, 1)
-            if n_samples > manager.max_samples
-                # random sample
-                sample_indices = randperm(n_samples)[1:(manager.max_samples)]
-                X_mapped_sampled = X_mapped[sample_indices, :]
-
-                # check the dimension of dataset.y
-                y_dims = size(dataset.y)
-                if length(y_dims) == 1
-                    y_sampled = dataset.y[sample_indices]
-                else
-                    y_sampled = dataset.y[:, sample_indices]
-                end
-            else
-                X_mapped_sampled = X_mapped
-                y_sampled = dataset.y
-            end
-
-            # add debug info
-            # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
-            # to cuda 0
-            X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
-            y_sampled = Float32.(y_sampled) # for saving memory
-            device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
-
-            # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
-            # y_sampled = to(y_sampled, CUDA(0))
-
-            # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
-            n_variables = size(X_mapped_sampled, 2)
-            variable_names = ["x$i" for i in 1:n_variables]
-            manager.net.current_expr_ls = if isnothing(top_subtrees)
-                # Variable expressions are used by default
-                [
-                    Expression(
-                        Node(Float32; feature=i);
-                        operators=options.operators,
-                        variable_names=variable_names,
-                    ) for i in 1:n_variables
-                ]
-            elseif top_subtrees isa Vector{Node}
-                # If it is a Node array, convert it to an Expression array
-                [
-                    Expression(
-                        node; operators=options.operators, variable_names=variable_names
-                    ) for node in top_subtrees
-                ]
-            elseif top_subtrees isa Vector{Expression}
-                # If it is already an Expression array, use it directly
-                top_subtrees
-            else
-                throw(
-                    ArgumentError(
-                        "top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}",
-                    ),
-                )
-            end
-
-            best_expressions = get_best_expr_and_MSE_topk(
-                manager.net, X_mapped_sampled, y_sampled
+            # 2. Select top N subtrees (potential features for PSRN)
+            # This function MUST return exactly N_PSRN_INPUT nodes
+            top_subtrees = select_top_subtrees(
+                common_subtrees,
+                N_PSRN_INPUT, # Target number of features for PSRN
+                options,
+                n_variables # Number of original variables
             )
 
-            put!(manager.channel, best_expressions)
+            if length(top_subtrees) == 0
+                 @warn "[Dev:$current_device Task:$task_id] No suitable subtrees selected for PSRN input. Skipping."
+                 put!(manager.channel, Expression[]) # Put empty result
+                 return # Exit task
+            end
+            if length(top_subtrees) != N_PSRN_INPUT
+                 @warn "[Dev:$current_device Task:$task_id] Selected $(length(top_subtrees)) subtrees, but PSRN expected $N_PSRN_INPUT. PSRN input layer size might mismatch if not flexible."
+                 # PSRN needs to handle this size mismatch or selection must guarantee N
+                 # Adjusting N_PSRN_INPUT here might be complex if PSRN is pre-built
+            end
+            actual_n_psrn_inputs = length(top_subtrees) # The actual number selected
 
-            # @info "best_expressions: $best_expressions"
+            # 3. Evaluate selected subtrees on the dataset (CPU)
+            # @info "[Dev:$current_device Task:$task_id] Evaluating $(actual_n_psrn_inputs) subtrees..."
+            X_mapped_cpu = evaluate_subtrees(top_subtrees, dataset, options)
+            # @info "[Dev:$current_device Task:$task_id] Subtree evaluation complete. Size: $(size(X_mapped_cpu))"
+
+            # 4. Check evaluated features for issues (CPU) BEFORE sampling/transfer
+            nan_inf_x = .!isfinite.(X_mapped_cpu)
+            if any(nan_inf_x)
+                num_nan_inf = sum(nan_inf_x)
+                @warn "[Dev:$current_device Task:$task_id] Non-finite values ($num_nan_inf) detected in evaluated subtrees (X_mapped_cpu). Replacing with 0."
+                X_mapped_cpu[nan_inf_x] .= zero(T) # Use zero of dataset type
+            end
+            y_cpu = vec(dataset.y) # Ensure y is a vector
+            nan_inf_y = .!isfinite.(y_cpu)
+             if any(nan_inf_y)
+                 num_nan_inf = sum(nan_inf_y)
+                 @error "[Dev:$current_device Task:$task_id] Non-finite values ($num_nan_inf) detected in target variable (dataset.y). Cannot proceed with PSRN."
+                 put!(manager.channel, Expression[]) # Signal failure/empty result
+                 return # Exit the task
+            end
+
+            # --- Data Sampling (CPU) ---
+            n_samples = size(X_mapped_cpu, 1)
+            local X_sampled_cpu::Matrix{T}, y_sampled_cpu::Vector{T}
+
+            if n_samples > manager.max_samples
+                # @info "[Dev:$current_device Task:$task_id] Sampling $(manager.max_samples) out of $n_samples for PSRN."
+                sample_indices = randperm(n_samples)[1:(manager.max_samples)]
+                X_sampled_cpu = X_mapped_cpu[sample_indices, :]
+                y_sampled_cpu = y_cpu[sample_indices] # y is already a vector
+            else
+                # Use all samples
+                X_sampled_cpu = X_mapped_cpu
+                y_sampled_cpu = y_cpu
+            end
+
+            # --- Data Transfer to GPU ---
+            # @info "[Dev:$current_device Task:$task_id] Transferring data to GPU..."
+            X_gpu = cu(T_GPU.(X_sampled_cpu)) # Convert to T_GPU and move
+            y_gpu = cu(T_GPU.(y_sampled_cpu)) # Convert Vector to T_GPU and move
+             # @info "[Dev:$current_device Task:$task_id] Data transfer complete. X size: $(size(X_gpu)), Y size: $(size(y_gpu))"
+
+             # Verify dimensions match expected PSRN input size
+             if size(X_gpu, 2) != actual_n_psrn_inputs
+                  @error "[Dev:$current_device Task:$task_id] Dimension mismatch after transfer: X_gpu columns ($(size(X_gpu, 2))) != selected subtrees ($actual_n_psrn_inputs)."
+                   # Clean up and exit task
+                  X_gpu = nothing; y_gpu = nothing; GC.gc(true); CUDA.synchronize()
+                  put!(manager.channel, Expression[])
+                  return
+             end
+
+            # --- Prepare PSRN Input Expressions ---
+            # PSRN's internal `_get_expr` uses `current_expr_ls` as its base cases.
+            # This list should contain the Expression objects corresponding to the columns of X_gpu.
+            variable_names_psrn = ["f$i" for i in 1:actual_n_psrn_inputs] # Names for PSRN input features
+            manager.net.current_expr_ls = [
+                Expression(node; operators=options.operators, variable_names=variable_names_psrn)
+                for node in top_subtrees # Use the actual selected subtrees
+            ]
+            # @info "[Dev:$current_device Task:$task_id] Updated PSRN input expression list with $(length(manager.net.current_expr_ls)) expressions."
+
+            # Verify PSRN input layer size matches actual inputs (important!)
+             if manager.net.layers[1].in_dim != actual_n_psrn_inputs
+                 @error "[Dev:$current_device Task:$task_id] PSRN n_variables ($(manager.net.layers[1].in_dim)) doesn't match actual input features ($actual_n_psrn_inputs). PSRN was likely initialized incorrectly or selection failed."
+                  # Clean up and exit task
+                 X_gpu = nothing; y_gpu = nothing; GC.gc(true); CUDA.synchronize()
+                 put!(manager.channel, Expression[])
+                 return
+             end
+
+            # --- Execute PSRN on GPU ---
+            # @info "[Dev:$current_device Task:$task_id] Executing PSRN forward pass and top-k selection..."
+            forward_start_time = time()
+            @info "[PSRN Task RUN] Calling get_best_expr_and_MSE_topk on device $(CUDA.device()). X_gpu size=$(size(X_gpu)), Y_gpu size=$(size(y_gpu))"
+            # CUDA.synchronize() # Force sync before call for timing/visibility
+            best_expressions = get_best_expr_and_MSE_topk(
+                manager.net, X_gpu, y_gpu # Pass GPU data
+            )
+            # CUDA.synchronize() # Force sync after call
+            @info "[PSRN Task DONE] get_best_expr_and_MSE_topk finished. Found $(length(best_expressions)) expressions."
+            forward_duration = time() - forward_start_time
+            # @info "[Dev:$current_device Task:$task_id] PSRN execution complete in $(round(forward_duration, digits=3))s. Found $(length(best_expressions)) expressions."
+
+            # --- Cleanup GPU Memory ---
+            X_gpu = nothing; y_gpu = nothing # Allow GC to collect CuArrays
+            # Trigger GC more aggressively if needed:
+            # GC.gc(true); CUDA.synchronize()
+            # @info "[Dev:$current_device Task:$task_id] GPU Memory after PSRN: $(CUDA.memory_status())"
+            final_status = "success"
+
         catch e
+            # --- Error Handling ---
+            final_status = "error"
             bt = stacktrace(catch_backtrace())
+            # Ensure manager is accessible for channel even in catch
+            current_device_err = CUDA.isfunctional() ? CUDA.device() : -1 # Get current device for logging safely
+            task_id_err = Threads.threadid()
             @error """
-            PSRN task execution error:
+            [Dev:$current_device_err Task:$task_id_err] PSRN task execution error in computation #$(manager.call_count):
             Error type: $(typeof(e))
             Error message: $e
-            Error location: $(bt[1])
-            Full stack:
+            Stacktrace:
             $(join(string.(bt), "\n"))
             """
-            GC.gc()
-            # @error """
-            # PSRN task execution error:
-            # Error type: $(typeof(e))
-            # Error location: $(bt[1])
-            # """
+             try
+                 # Attempt to put an empty result to signal failure
+                 put!(manager.channel, Expression[])
+             catch chan_err
+                 @error "[Dev:$current_device_err Task:$task_id_err] Failed to put error signal into PSRN channel: $chan_err"
+             end
+            # Cleanup attempt
+            GC.gc(true); CUDA.isfunctional() && CUDA.synchronize()
+            # Ensure best_expressions is empty on error
+            best_expressions = Expression[]
         end
-    end
+
+        # --- Finalize Task ---
+        # Put the results (potentially empty on error) into the channel
+        put!(manager.channel, best_expressions)
+        task_duration = time() - task_start_time
+        @info "✅ [Dev:$device_id Task:$(Threads.threadid())] PSRN task #$(manager.call_count) finished. Status: $final_status. Duration: $(round(task_duration, digits=3))s. Results: $(length(best_expressions)) expressions."
+
+    end # end Threads.@spawn
 end
 
-# Check and process PSRN results
 function process_psrn_results!(
     manager::PSRNManager,
-    hall_of_fame::HallOfFame,
-    dataset::Dataset,
+    hall_of_fame::HallOfFame{T, L, NT}, # Add type parameters for clarity
+    dataset::Dataset{T, L},
     options::AbstractOptions,
-)
-    while isready(manager.channel)
-        new_expressions = take!(manager.channel)
-        if !isempty(new_expressions)
-            for psrn_expr in new_expressions
-                # Create a new Expression using target type
-                converted_expr = Expression(
-                    psrn_expr.tree;  # Only keep the tree structure
-                    operators=nothing,  # Set to nothing
-                    variable_names=nothing,  # Set to nothing
-                )
-
-                member = PopMember(dataset, converted_expr, options; deterministic=false)
-                # @info "PSRN member: $member"
-                # @info "type of member: $(typeof(member))"
-                update_hall_of_fame!(hall_of_fame, [member], options)
-            end
-            @info "✅Added PSRN results to hall of fame"
-        end
-        @info "✅process_psrn_results OK!"
+) where {T, L, NT} # Match types
+    # Check if manager is the placeholder or not
+    if !CUDA.functional() || !(manager isa PSRNManager)
+        return # Skip if CUDA not working or manager is placeholder
     end
-    
+
+    results_processed = 0
+    newly_added_members = PopMember{T,L,NT}[] # Store members added in this call
+    expressions_added_count = 0
+
+    while isready(manager.channel)
+        new_expressions = take!(manager.channel) # Vector{Expression}
+        results_processed += 1
+        if !isempty(new_expressions)
+            # @info "Processing $(length(new_expressions)) expressions from PSRN..."
+            current_add_batch = PopMember{T,L,NT}[] # Members from this specific channel read
+
+            for psrn_expr in new_expressions
+                # Create PopMember from the raw PSRN expression tree
+                # Ensure type T matches the dataset/hall_of_fame
+                try
+                     # PopMember constructor handles type T for constants
+                    mem = PopMember(dataset, psrn_expr.tree, options; T=T, deterministic=false)
+                    push!(current_add_batch, mem)
+                catch e
+                    @warn "Failed to create PopMember from PSRN expression: $(string_tree(psrn_expr, options)). Error: $e"
+                    # Skip this expression
+                end
+            end
+
+            if !isempty(current_add_batch)
+                 # Update HoF with the batch of new members
+                num_added = update_hall_of_fame!(hall_of_fame, current_add_batch, options)
+                expressions_added_count += num_added
+            end
+        else
+             # @info "PSRN task returned an empty result list." # Reduce verbosity
+        end
+    end
+
+    if expressions_added_count > 0
+        @info "✅ Added $expressions_added_count new equations from PSRN results to Hall of Fame."
+    elseif results_processed > 0 # Channel was read but list was empty or no improvement
+         # @info "PSRN results processed, but no new equations improved the Hall of Fame." # Reduce verbosity
+    end
+    # No message if channel wasn't ready
 end
 
 function _main_search_loop!(
     state::AbstractSearchState{T,L,N},
-    datasets,
+    datasets::Vector{D}, # Add type
     ropt::AbstractRuntimeOptions,
     options::AbstractOptions,
-) where {T,L,N}
+    # Add PSRN related arguments:
+    use_psrn::Bool,
+    psrn_manager::Union{PSRNManager, Nothing} # Receive manager (or nothing)
+) where {T,L,N, D<:Dataset} # Add D type parameter
+
     ropt.verbosity > 0 && @info "Started!"
     nout = length(datasets)
     start_time = time()
@@ -1332,27 +1544,6 @@ function _main_search_loop!(
 
     println(options)
 
-    if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
-        println("Use PSRN")
-        # N_PSRN_INPUT = 15
-        # N_PSRN_INPUT = 5 # TODO this can be tuned
-        N_PSRN_INPUT = 4 # TODO this can be tuned
-
-
-        psrn_manager = PSRNManager(;
-            N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
-            operators=["Add", "Mul", "Sub", "Div", "Identity","Sqrt"], # TODO maybe we can place this in options
-            # operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
-            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log", "Sqrt"], # TODO maybe we can place this in options
-            # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-            # operators = ["Add", "Mul", "Identity"],
-            # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
-            n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
-            options=options
-        )
-    else
-        println("Not use PSRN")
-    end
 
     if ropt.parallelism in (:multiprocessing, :multithreading)
         for j in 1:nout, i in 1:(options.populations)
@@ -1428,18 +1619,38 @@ function _main_search_loop!(
             update_hall_of_fame!(state.halls_of_fame[j], best_seen.members[best_seen.exists], options)
             #! format: on
 
+            # @info "[Cycle Check] use_psrn=$use_psrn, psrn_manager !== nothing = $(psrn_manager !== nothing)"
+            if use_psrn && psrn_manager !== nothing
+                @info "[PSRN Check] Conditions met, attempting PSRN logic for j=$j, i=$i"
+                # --- PSRN Logic ---
+                if use_psrn && psrn_manager !== nothing
+                    # If initialized successfully, run PSRN steps
+            dominating = calculate_pareto_frontier(state.halls_of_fame[j])
+            dominating = calculate_pareto_frontier(state.halls_of_fame[j])
+
+                    dominating = calculate_pareto_frontier(state.halls_of_fame[j])
+
+                    dominating_trees = [member.tree for member in dominating]
+
+                    # Ensure N_PSRN_INPUT is correct from the initialized manager
+                    if !isempty(dominating_trees) # Only run if HoF is not empty
+                        start_psrn_task(
+                            psrn_manager, dominating_trees, dataset, options, psrn_manager.N_PSRN_INPUT, n_variables
+                        )
+                        process_psrn_results!(
+                            psrn_manager, state.halls_of_fame[j], dataset, options
+                        )
+                    end
+                end
+                # --- End PSRN Logic ---
+            end
+
+
+
             dominating = calculate_pareto_frontier(state.halls_of_fame[j])
 
             dominating_trees = [member.tree for member in dominating]
 
-            if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
-                start_psrn_task(
-                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
-                )
-                process_psrn_results!(
-                    psrn_manager, state.halls_of_fame[j], dataset, options
-                )
-            end
 
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)
@@ -1576,6 +1787,20 @@ function _main_search_loop!(
             check_for_timeout(start_time, options),
             check_max_evals(state.num_evals, options),
         ))
+            @info "Stopping search due to early stopping condition."
+            # Ensure PSRN task is cleaned up if stopping early
+            if use_psrn && psrn_manager !== nothing
+                if psrn_manager.current_task !== nothing && !istaskdone(psrn_manager.current_task)
+                    @info "Waiting for final PSRN task to complete before exiting..."
+                    # Optionally add a timeout here
+                    try wait(psrn_manager.current_task) catch end
+                end
+                # Process any remaining results from all outputs
+                for jj in 1:nout
+                    process_psrn_results!(psrn_manager, state.halls_of_fame[jj], datasets[jj], options)
+                end
+            end
+
             break
         end
         ################################################################

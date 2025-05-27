@@ -22,8 +22,16 @@ julia ]
 ```
 
 ```bash
-conda activate ./.CondaPkg/.pixi/envs/default
-(default) $ uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+# (deprecated)
+# conda activate ./.CondaPkg/.pixi/envs/default
+# (default) $ uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+```
+
+
+```bash
+using CondaPkg
+CondaPkg.add("pip")
+/home/kent/.julia/environments/v1.11/.CondaPkg/.pixi/envs/default/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
 
 ### 🏃‍♂️ 3. Run 

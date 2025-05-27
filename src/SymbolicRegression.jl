@@ -1441,7 +1441,7 @@ function _main_search_loop!(
             dominating_trees = [member.tree for member in dominating]
             if options.populations > 3
                 # 只在特定条件下发送PSRN请求（减少频率）
-                if kappa % (options.populations * 2) == 1  # 每2轮才调用一次
+                if kappa % (options.populations * 1) == 1  # 每1轮调用一次
                     request_psrn_computation!(
                         psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
                     )

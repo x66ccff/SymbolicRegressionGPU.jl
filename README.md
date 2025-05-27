@@ -37,7 +37,7 @@ CondaPkg.add("pip")
 ### 🏃‍♂️ 3. Run 
 ```bash
 # Note: only supports one thread now
-julia example.jl
+julia example.jl -t 16,2
 ```
 
 # 📚 Citing 

@@ -474,9 +474,9 @@ function get_best_expr_and_MSE_topk(
         HR = PSRN_forward(model, x_sliced)
         diffR = model.diff_compiled(HR, Y[i])
         sum_squared_errors_R = model.sum_squared_add_compiled(sum_squared_errors_R, diffR)
-        @info "GC.......🧹"
-        GC.gc()
-        @info "GC sucess🧹"
+        # @info "GC.......🧹"
+        # GC.gc()
+        # @info "GC sucess🧹"
     end
 
     sum_squared_errors_R = model.f_select(model.f_is_finite(sum_squared_errors_R),

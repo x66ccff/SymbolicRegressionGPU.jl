@@ -18,7 +18,7 @@ function main()
     y = Float32.(data[:, 5])  # 最后一列是target
 
     options = SymbolicRegression.Options(;
-        timeout_in_seconds=60000000,
+        timeout_in_seconds=120,
         binary_operators=[+, *, /, -],
         unary_operators=[sin, cos, exp, log, sqrt],
         population_size=100,

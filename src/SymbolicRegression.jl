@@ -85,8 +85,13 @@ export Population,
     erfc,
     atanh_clip,
     PSRNManager,
-    start_psrn_task,
-    process_psrn_results!
+    # start_psrn_task,
+    process_psrn_results!,
+    # 在现有的 export 语句中添加:
+    start_background_processing!,
+    process_psrn_computation!,
+    request_psrn_computation!,
+    stop_background_processing!
 
 using Distributed
 using Printf: @printf, @sprintf
@@ -805,22 +810,23 @@ end
 
 mutable struct PSRNManager
     channel::Channel{Vector{Expression}}
+    request_channel::Channel{Tuple{Vector{Expression}, Dataset, AbstractOptions, Int, Int}}
     current_task::Union{Task,Nothing}
+    background_task::Union{Task,Nothing}
     call_count::Int
     N_PSRN_INPUT::Int
     net::PSRN
     max_samples::Int
     PSRN_topk::Int
+    should_stop::Ref{Bool}
 
     function PSRNManager(;
         N_PSRN_INPUT::Int,
         operators::Vector{String},
         n_symbol_layers::Int,
         options::Options,
-        max_samples::Int=10, # kk TODO number of samples to use for PSRN (if > max_samples, we will random sample for each forward)
+        max_samples::Int=10,
         PSRN_topk::Int=50,
-        # PSRN_topk::Int=300,
-
     )
         psrn = PSRN(;
             n_variables=N_PSRN_INPUT,
@@ -831,12 +837,25 @@ mutable struct PSRNManager
             PSRN_topk=PSRN_topk
         )
 
-        return new(
-            Channel{Vector{Expression}}(1000), nothing, 0, N_PSRN_INPUT, psrn, max_samples
+        manager = new(
+            Channel{Vector{Expression}}(1000), 
+            Channel{Tuple{Vector{Expression}, Dataset, AbstractOptions, Int, Int}}(1000),
+            nothing, 
+            nothing,
+            0, 
+            N_PSRN_INPUT, 
+            psrn, 
+            max_samples,
+            PSRN_topk,
+            Ref(false)
         )
+
+        # Start background processing thread
+        start_background_processing!(manager)
+        
+        return manager
     end
 end
-
 
 function get_used_variables(node, var_names)
     used_vars = Set{String}()
@@ -1155,7 +1174,29 @@ get_subtrees(x::Number) = Node[]
 get_subtrees(x::Symbol) = Node[]
 
 
-function start_psrn_task(
+function start_background_processing!(manager::PSRNManager)
+    manager.background_task = Threads.@spawn begin
+        while !manager.should_stop[]
+            try
+                # Wait for PSRN requests with timeout
+                if isready(manager.request_channel)
+                    dominating_trees, dataset, options, N_PSRN_INPUT, n_variables = take!(manager.request_channel)
+                    
+                    # Process PSRN computation
+                    process_psrn_computation!(manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables)
+                else
+                    # Sleep briefly to avoid busy waiting
+                    sleep(0.1)
+                end
+            catch e
+                @error "Background PSRN processing error: $e"
+                # Continue processing even if one computation fails
+            end
+        end
+    end
+end
+
+function process_psrn_computation!(
     manager::PSRNManager,
     dominating_trees::Vector{<:Expression},
     dataset::Dataset,
@@ -1163,111 +1204,89 @@ function start_psrn_task(
     N_PSRN_INPUT::Int,
     n_variables::Int
 )
-    if manager.current_task !== nothing && !istaskdone(manager.current_task)
-        return nothing
-    end
+    try
+        manager.call_count += 1
+        @info "Starting PSRN computation ($(manager.call_count)) in background thread"
+        
+        common_subtrees = analyze_common_subtrees(dominating_trees, options)
+        top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
+        shuffle!(top_subtrees)
 
-    return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
-        try
-            manager.call_count += 1
-            # @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)  🔥 get_memory_allocated_gb  $(get_memory_allocated_gb())"
-            
-            common_subtrees = analyze_common_subtrees(dominating_trees, options)
-            top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
-            shuffle!(top_subtrees)
+        X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
-            @info "Selected subtrees:" top_subtrees
-            @info "👇"
-            for expr in top_subtrees
-                @info expr
-            end 
-            @info "👆"
-
-            X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-
-            # add downsampling 
-            n_samples = size(X_mapped, 1)
-            if n_samples > manager.max_samples
-                # random sample
-                sample_indices = randperm(n_samples)[1:(manager.max_samples)]
-                X_mapped_sampled = X_mapped[sample_indices, :]
-
-                # check the dimension of dataset.y
-                y_dims = size(dataset.y)
-                if length(y_dims) == 1
-                    y_sampled = dataset.y[sample_indices]
-                else
-                    y_sampled = dataset.y[:, sample_indices]
-                end
+        # Downsampling
+        n_samples = size(X_mapped, 1)
+        if n_samples > manager.max_samples
+            sample_indices = randperm(n_samples)[1:(manager.max_samples)]
+            X_mapped_sampled = X_mapped[sample_indices, :]
+            y_dims = size(dataset.y)
+            if length(y_dims) == 1
+                y_sampled = dataset.y[sample_indices]
             else
-                X_mapped_sampled = X_mapped
-                y_sampled = dataset.y
+                y_sampled = dataset.y[:, sample_indices]
             end
-
-            # add debug info
-            # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
-            # to cuda 0
-            X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
-            y_sampled = Float32.(y_sampled) # for saving memory
-            device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
-
-            # X_mapped_sampled = to(X_mapped_sampled, CUDA(0))
-            # y_sampled = to(y_sampled, CUDA(0))
-
-            # function get_best_expr_and_MSE_topk(model::PSRN, X::Tensor, Y::Tensor, n_top::Int)
-            n_variables = size(X_mapped_sampled, 2)
-            variable_names = ["x$i" for i in 1:n_variables]
-            manager.net.current_expr_ls = if isnothing(top_subtrees)
-                # Variable expressions are used by default
-                [
-                    Expression(
-                        Node(Float32; feature=i);
-                        operators=options.operators,
-                        variable_names=variable_names,
-                    ) for i in 1:n_variables
-                ]
-            elseif top_subtrees isa Vector{Node}
-                # If it is a Node array, convert it to an Expression array
-                [
-                    Expression(
-                        node; operators=options.operators, variable_names=variable_names
-                    ) for node in top_subtrees
-                ]
-            elseif top_subtrees isa Vector{Expression}
-                # If it is already an Expression array, use it directly
-                top_subtrees
-            else
-                throw(
-                    ArgumentError(
-                        "top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}",
-                    ),
-                )
-            end
-
-            best_expressions = get_best_expr_and_MSE_topk(
-                manager.net, X_mapped_sampled, y_sampled
-            )
-
-            put!(manager.channel, best_expressions)
-
-            # @info "best_expressions: $best_expressions"
-        catch e
-            bt = stacktrace(catch_backtrace())
-            @error """
-            PSRN task execution error:
-            Error type: $(typeof(e))
-            Error message: $e
-            Error location: $(bt[1])
-            Full stack:
-            $(join(string.(bt), "\n"))
-            """
-            GC.gc()
-            # @error """
-            # PSRN task execution error:
-            # Error type: $(typeof(e))
-            # Error location: $(bt[1])
-            # """
+        else
+            X_mapped_sampled = X_mapped
+            y_sampled = dataset.y
         end
+
+        # Convert to Float32 for memory efficiency
+        X_mapped_sampled = Float32.(X_mapped_sampled)
+        y_sampled = Float32.(y_sampled)
+
+        n_variables = size(X_mapped_sampled, 2)
+        variable_names = ["x$i" for i in 1:n_variables]
+        
+        manager.net.current_expr_ls = if isnothing(top_subtrees)
+            [Expression(Node(Float32; feature=i); operators=options.operators, variable_names=variable_names) for i in 1:n_variables]
+        elseif top_subtrees isa Vector{Node}
+            [Expression(node; operators=options.operators, variable_names=variable_names) for node in top_subtrees]
+        elseif top_subtrees isa Vector{Expression}
+            top_subtrees
+        else
+            throw(ArgumentError("top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}"))
+        end
+
+        best_expressions = get_best_expr_and_MSE_topk(manager.net, X_mapped_sampled, y_sampled)
+        
+        # Put results in the output channel (non-blocking)
+        try
+            if length(manager.channel.data) < manager.channel.sz_max
+                put!(manager.channel, best_expressions)
+            else
+                @warn "PSRN result channel is full, skipping result"
+            end
+        catch e
+            @error "Failed to put PSRN result: $e"
+        end
+
+    catch e
+        bt = stacktrace(catch_backtrace())
+        @error "PSRN computation error: $e\nStack trace: $(join(string.(bt), "\n"))"
+        GC.gc()
+    end
+end
+function request_psrn_computation!(
+    manager::PSRNManager,
+    dominating_trees::Vector{<:Expression},
+    dataset::Dataset,
+    options::AbstractOptions,
+    N_PSRN_INPUT::Int,
+    n_variables::Int
+)
+    # 使用完全非阻塞的方式
+    @async begin
+        try
+            put!(manager.request_channel, (dominating_trees, dataset, options, N_PSRN_INPUT, n_variables))
+        catch e
+            @debug "PSRN request channel error: $e"
+        end
+    end
+end
+function stop_background_processing!(manager::PSRNManager)
+    manager.should_stop[] = true
+    if manager.background_task !== nothing
+        wait(manager.background_task)
     end
 end
 
@@ -1329,24 +1348,19 @@ function _main_search_loop!(
 
     if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
-        # N_PSRN_INPUT = 15
-        # N_PSRN_INPUT = 5 # TODO this can be tuned
-        N_PSRN_INPUT = 5 # TODO this can be tuned
-
-
-        psrn_manager = PSRNManager(;
-            N_PSRN_INPUT=N_PSRN_INPUT,            # these operators must be the subset of options.operators
-            operators=["Add", "Mul", "Sub", "Div", "Identity","Sqrt"], # TODO maybe we can place this in options
-            # operators=["Add", "Mul", "Sub", "Div", "Identity"], # TODO maybe we can place this in options
-            # operators=["Add", "Mul", "Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log", "Sqrt"], # TODO maybe we can place this in options
-            # operators = ["Sub", "Div", "Identity", "Cos", "Sin", "Exp", "Log"],
-            # operators = ["Add", "Mul", "Identity"],
-            # operators = ["Add", "Mul", "Neg", "Inv", "Identity", "Cos", "Sin", "Exp", "Log"],
-            n_symbol_layers=3, # TODO if use 3 layer, easily crash (segfault), don't know why
+        N_PSRN_INPUT = 3 # TODO this can be tuned
+        # N_PSRN_INPUT = 20 # TODO this can be tuned
+    
+        global psrn_manager = PSRNManager(;  # Make it global so teardown can access it
+            N_PSRN_INPUT=N_PSRN_INPUT,
+            operators=["Add", "Mul", "Sub", "Div", "Identity","Sqrt"],
+            n_symbol_layers=3,
+            # n_symbol_layers=2,
             options=options
         )
     else
         println("Not use PSRN")
+        global psrn_manager = nothing  # Set to nothing when not using PSRN
     end
 
     if ropt.parallelism in (:multiprocessing, :multithreading)
@@ -1425,11 +1439,14 @@ function _main_search_loop!(
             dominating = calculate_pareto_frontier(state.halls_of_fame[j])
 
             dominating_trees = [member.tree for member in dominating]
-
-            if options.populations > 3 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
-                start_psrn_task(
-                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
-                )
+            if options.populations > 3
+                # 只在特定条件下发送PSRN请求（减少频率）
+                if kappa % (options.populations * 2) == 1  # 每2轮才调用一次
+                    request_psrn_computation!(
+                        psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
+                    )
+                end
+                # 每次都检查结果
                 process_psrn_results!(
                     psrn_manager, state.halls_of_fame[j], dataset, options
                 )
@@ -1584,6 +1601,12 @@ function _tear_down!(
     state::AbstractSearchState, ropt::AbstractRuntimeOptions, options::AbstractOptions
 )
     close_reader!(state.stdin_reader)
+
+    # Stop PSRN background processing if it exists
+    if options.populations > 3 && @isdefined(psrn_manager) && psrn_manager !== nothing
+        stop_background_processing!(psrn_manager)
+    end
+
     # Safely close all processes or threads
     if ropt.parallelism == :multiprocessing
         state.we_created_procs && rmprocs(state.procs)

@@ -1436,7 +1436,27 @@ function _main_search_loop!(
 
         psrn_manager = PSRNManager()
 
-        N_PSRN_INPUT = 7
+
+
+        ############# 
+        # 80GB GPU
+
+        # N_PSRN_INPUT = 7
+        # n_symbol_layers = 3
+        # max_samples = 5
+        # # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
+        # # operators = ["Add", "Mul","Identity","Neg","Inv","Sin","Cos","Exp","Log"]
+        # # operators = ["Add", "Mul", "Sub","Div","Identity"]
+
+        # # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
+        # # operators = ["Add","Mul","SemiSub","Identity","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 37.33GB
+        # operators = ["Add","Mul","SemiSub","Identity","Neg","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 44 GB
+
+        ################## 
+
+        # 24GB GPU
+
+        N_PSRN_INPUT = 5
         n_symbol_layers = 3
         max_samples = 5
         # operators = ["Add", "Mul", "Inv", "Neg","Identity","Pow2"] #5input, 3layer
@@ -1445,7 +1465,9 @@ function _main_search_loop!(
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
         # operators = ["Add","Mul","SemiSub","Identity","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 37.33GB
-        operators = ["Add","Mul","SemiSub","Identity","Neg","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 44 GB
+        operators = ["Add","Mul","SemiSub","SemiDiv","Identity","Neg","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 44 GB
+
+
 
         initialize!(
             psrn_manager,

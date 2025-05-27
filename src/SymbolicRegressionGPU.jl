@@ -831,7 +831,7 @@ mutable struct PSRNManager
 
     function PSRNManager()
         new(
-            Channel{Vector{Expression}}(32),
+            Channel{Vector{Expression}}(128),
             nothing,
             0,
             0,
@@ -997,12 +997,12 @@ function select_top_subtrees(
             # 如果没有可用的feature了，就生成随机的树
             # push!(result, Node(Float32; val=rand(-5:5)))
         tree = gen_random_tree(
-            rand(1:4),                     # length
+            rand(1:5),                     # length
             options,              # options
             n_variables,          # nfeatures
             Float32;
             only_gen_bin_op=true,
-            only_gen_int_const=false,
+            only_gen_int_const=true,
             feature_prob=0.7
         )
         push!(result, tree)
@@ -1197,55 +1197,15 @@ function start_psrn_task(
         return nothing
     end
 
-    function cleanup_pytorch_tensors()
-        # 获取 Main 模块中的所有变量名
-        vars = names(Main; all=true)
-        
-        cleaned_count = 0
-        
-        for var in vars
-            # 跳过特殊变量名(以 _ 开头的)
-            startswith(string(var), "_") && continue
-            
-            # 获取变量值
-            try
-                val = getfield(Main, var)
-                
-                # 检查是否是 Python 对象且是 torch.Tensor
-                if typeof(val) == Py && pyisinstance(val, torch[].Tensor)
-                    # 删除 tensor
-                    PythonCall.pydel!(val)
-                    cleaned_count += 1
-                    println("Cleaned tensor: $var")
-                end
-            catch
-                # 如果获取变量值失败则跳过
-                continue
-            end
-        end
-        
-        println("Total cleaned tensors: $cleaned_count")
-    end
-
-    return manager.current_task = Threads.@spawn begin # export JULIA_NUM_THREADS=4
-    # return manager.current_task = begin # export JULIA_NUM_THREADS=4
+    return manager.current_task = Threads.@spawn :interactive begin
         try
             manager.call_count += 1
             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
             common_subtrees = analyze_common_subtrees(dominating_trees, options)
-            # @info "✨"
             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
             shuffle!(top_subtrees)
-            # @info "✨✨"
-
-            # @info "Selected subtrees:" top_subtrees
-            # @info "✨Selected subtrees:"
-            # for expr in top_subtrees
-            #    @info expr
-            # end
 
             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-            # @info "✨✨✨"
             
             # add downsampling 
             n_samples = size(X_mapped, 1)
@@ -1269,13 +1229,18 @@ function start_psrn_task(
             X_mapped_sampled = Float16.(X_mapped_sampled) # for saving memory
             y_sampled = Float16.(y_sampled) # for saving memory
 
+            # 临时禁用Python GC以提高性能
+            PythonCall.GC.disable()
+
             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
             row, col = size(X_mapped_sampled)
-            X_mapped_sampled_pyarray = array_class_ref[]('f',X_mapped_sampled')
-            y_sampled_pyarray = array_class_ref[]('f',y_sampled)
+            # 将转置结果材料化为实际的数组
+            X_mapped_sampled_pyarray = array_class_ref[]('f', collect(vec(X_mapped_sampled')))
+            y_sampled_pyarray = array_class_ref[]('f', vec(y_sampled))
             X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
-            X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.reshape(row, col)
+            X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.reshape(col, row)  # 注意：维度交换
             y_sampled_pytorch = torch_tensor_ref[](y_sampled_pyarray).to(now_device[])
+            
             n_variables = size(X_mapped_sampled, 2)
             variable_names = ["x$i" for i in 1:n_variables]
             manager.net.current_expr_ls = if isnothing(top_subtrees)
@@ -1320,7 +1285,7 @@ function start_psrn_task(
                 sum_.add_(diff)
 
                 PythonCall.pydel!(diff)
-                GC.gc() # https://github.com/JuliaPy/PythonCall.jl/issues/592
+                # 删除了循环内的 GC.gc()
             end
             sum_ = sum_.reshape(-1)
 
@@ -1347,11 +1312,18 @@ function start_psrn_task(
 
             put!(manager.channel, best_expressions)
 
+            # 重新启用Python GC
+            PythonCall.GC.enable()
+
             PythonCall.pydel!(X_mapped_sampled_pytorch)
             PythonCall.pydel!(y_sampled_pytorch)
             PythonCall.pydel!(indices)
             PythonCall.pydel!(values)
-            GC.gc() # https://github.com/JuliaPy/PythonCall.jl/issues/592
+            
+            # 只在每10次调用时才进行GC
+            if manager.call_count % 10 == 0
+                GC.gc(false)  # 使用增量GC
+            end
         catch e
             bt = stacktrace(catch_backtrace())
             @error """
@@ -1362,15 +1334,9 @@ function start_psrn_task(
             Full stack:
             $(join(string.(bt), "\n"))
             """
+            # 确保在错误情况下也重新启用 Python GC
+            PythonCall.GC.enable()
             GC.gc()
-            # sleep(1)
-            # PythonCall.GC.gc()
-            # torch[].cuda.empty_cache()
-            # @error """
-            # PSRN task execution error:
-            # Error type: $(typeof(e))
-            # Error location: $(bt[1])
-            # """
         end
     end
 end
@@ -1434,7 +1400,8 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
 
-        psrn_manager = PSRNManager()
+        # 创建全局PSRNManager实例
+        global psrn_manager = PSRNManager()
 
 
 
@@ -1465,7 +1432,8 @@ function _main_search_loop!(
 
         # 3_7_[Add_Mul_Identity_Neg_Inv_Sin_Cos_Exp_Log]_mask.npy
         # operators = ["Add","Mul","SemiSub","Identity","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 37.33GB
-        operators = ["Add","Mul","SemiSub","SemiDiv","Identity","Neg","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 44 GB
+        # operators = ["Add","Mul","SemiSub","SemiDiv","Identity","Neg","Inv","Sin","Cos","Exp","Log","Sqrt","Pow3"] # 44 GB
+        operators = ["Add","Mul","Identity","Sin","Cos","Exp","Log"] # 44 GB
 
 
 
@@ -1573,12 +1541,20 @@ function _main_search_loop!(
             dominating_trees = [member.tree for member in dominating]
 
             if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
-                start_psrn_task(
-                    psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
-                )
-                process_psrn_results!(
-                    psrn_manager, state.halls_of_fame[j], dataset, options
-                )
+                # 每完成一轮种群才调用一次PSRN
+                if state.cycles_remaining[j] % options.populations == 0
+                    start_psrn_task(
+                        psrn_manager, dominating_trees, dataset, options, N_PSRN_INPUT, n_variables
+                    )
+                end
+
+                # 非阻塞处理结果
+                if psrn_manager.current_task !== nothing && 
+                (istaskdone(psrn_manager.current_task) || isready(psrn_manager.channel))
+                    process_psrn_results!(
+                        psrn_manager, state.halls_of_fame[j], dataset, options
+                    )
+                end
             end
 
             if options.save_to_file

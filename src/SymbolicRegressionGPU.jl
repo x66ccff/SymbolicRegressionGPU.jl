@@ -916,7 +916,7 @@ function select_top_subtrees(
             # 如果没有可用的feature了，就生成随机的树
             # push!(result, Node(Float32; val=rand(-5:5)))
         tree = gen_random_tree(
-            rand(1:3),                     # length
+            rand(1:8),                     # length
             options,              # options
             n_variables,          # nfeatures
             Float32;
@@ -1275,7 +1275,7 @@ function _main_search_loop!(
     if options.populations > 0 # TODO I don' know how to add a option for control whether use PSRN or not, cause Option too complex for me ...
         println("Use PSRN")
         # N_PSRN_INPUT = 4
-        N_PSRN_INPUT = 35 # TODO this can be tuned
+        N_PSRN_INPUT = 20 # TODO this can be tuned
         # N_PSRN_INPUT = 4 # TODO this can be tuned
 
         psrn_manager = PSRNManager(;
@@ -1292,7 +1292,7 @@ function _main_search_loop!(
             # operators = ["Add", "Mul", "Neg", "Inv", "Identity"],
             n_symbol_layers=2, # TODO if use 3 layer, easily crash (segfault), don't know why
             options=options,
-            max_samples=10, # The sample size has an impact on the video memory.
+            max_samples=20, # The sample size has an impact on the video memory.
             # max_samples = 10
         )
     else

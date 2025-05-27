@@ -18,8 +18,8 @@ function main()
     options = SymbolicRegressionGPU.Options(;
         timeout_in_seconds=60,
         binary_operators=[+, *, /, -],
-        # unary_operators=[sin, cos, exp, log, sqrt],
-        unary_operators=[sin, cos, exp, log],
+        unary_operators=[sin, cos, exp, log, sqrt],
+        # unary_operators=[sin, cos, exp, log],
         # population_size=100,
         # populations=15,
         batching=true,

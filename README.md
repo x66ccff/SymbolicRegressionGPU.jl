@@ -21,8 +21,8 @@ julia ]
 ```
 
 ```bash
-activate path/to/your/.julia/environments/v1.11/.CondaPkg/env
-(.CondaPkg/env) $ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+conda activate /home/kent/_Project/PTSjl/SymbolicRegressionGPU.jl/.CondaPkg/.pixi/envs/default
+(default) $ uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
 
 ### 🏃‍♂️ 3. Run 

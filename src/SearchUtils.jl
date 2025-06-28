@@ -544,7 +544,7 @@ The state of the search, including the populations, worker outputs, tasks, and
 channels. This is used to manage the search and keep track of runtime variables
 in a single struct.
 """
-Base.@kwdef struct SearchState{T,L,N<:AbstractExpression{T},WorkerOutputType,ChannelType} <:
+Base.@kwdef mutable struct SearchState{T,L,N<:AbstractExpression{T},WorkerOutputType,ChannelType} <:
                    AbstractSearchState{T,L,N}
     procs::Vector{Int}
     we_created_procs::Bool
@@ -562,6 +562,9 @@ Base.@kwdef struct SearchState{T,L,N<:AbstractExpression{T},WorkerOutputType,Cha
     cur_maxsizes::Vector{Int}
     stdin_reader::StdinReader
     record::Base.RefValue{RecordType}
+    equation_speed::Vector{Float32}
+    fifo_out
+    fifo_in
 end
 
 function save_to_file(

@@ -561,17 +561,58 @@ function equation_search(
     return _equation_search(datasets, _runtime_options, options, saved_state)
 end
 
+function communicate_with_python(fifo_out, fifo_in)
+    try
+        # Send a random float to Python
+        test_num = rand(Float64)
+        #println("Julia: Sending ", test_num)
+        write(fifo_out, test_num)
+        flush(fifo_out)
+
+        # Non-blocking read from Python
+        if bytesavailable(fifo_in) > 0
+            received_num = read(fifo_in, Float64)
+            #println("Julia: Received ", received_num)
+            open("julia_get.log", "a") do f
+                write(f, string(received_num) * "\n")
+            end
+        end
+    catch e
+        # Non-critical error, so just print it
+        #println("Communication error: ", e)
+    end
+end
+
 @noinline function _equation_search(
     datasets::Vector{D}, ropt::AbstractRuntimeOptions, options::AbstractOptions, saved_state
 ) where {D<:Dataset}
-    _validate_options(datasets, ropt, options)
-    state = _create_workers(datasets, ropt, options)
-    _initialize_search!(state, datasets, ropt, options, saved_state)
-    _warmup_search!(state, datasets, ropt, options)
-    _main_search_loop!(state, datasets, ropt, options)
-    _tear_down!(state, ropt, options)
-    _info_dump(state, datasets, ropt, options)
-    return _format_output(state, datasets, ropt, options)
+    python_executable = "/home/kent/anaconda3/envs/PSRN/bin/python"
+    script_path = joinpath(@__DIR__, "heavy_cpu.py")
+    error_log = "python_errors.log"
+    python_process = run(pipeline(`$python_executable -u $script_path`, stderr=error_log); wait=false)
+    
+    fifo_out = open("julia_to_python_pipe", "w")
+    fifo_in = open("python_to_julia_pipe", "r")
+
+    try
+        _validate_options(datasets, ropt, options)
+        state = _create_workers(datasets, ropt, options)
+        # Pass pipes to the state
+        state.fifo_out = fifo_out
+        state.fifo_in = fifo_in
+
+        _initialize_search!(state, datasets, ropt, options, saved_state)
+        _warmup_search!(state, datasets, ropt, options)
+        _main_search_loop!(state, datasets, ropt, options)
+        _tear_down!(state, ropt, options)
+        _info_dump(state, datasets, ropt, options)
+        return _format_output(state, datasets, ropt, options)
+    finally
+        close(fifo_out)
+        close(fifo_in)
+        kill(python_process)
+        @info "python killed"
+    end
 end
 
 function _validate_options(
@@ -673,6 +714,7 @@ end
         get_cur_maxsize(; options, total_cycles, cycles_remaining=cycles_remaining[j]) for
         j in 1:nout
     ]
+    equation_speed = Float32[]
 
     return SearchState{T,L,typeof(example_ex),WorkerOutputType,ChannelType}(;
         procs=procs,
@@ -691,6 +733,9 @@ end
         cur_maxsizes=cur_maxsizes,
         stdin_reader=stdin_reader,
         record=Ref(record),
+        equation_speed=equation_speed,
+        fifo_out=nothing,
+        fifo_in=nothing,
     )
 end
 function _initialize_search!(
@@ -839,7 +884,6 @@ function _main_search_loop!(
     num_evals_last = sum(sum, state.num_evals)
     num_evals_since_last = sum(sum, state.num_evals) - num_evals_last  # i.e., start at 0
     print_every_n_seconds = 5
-    equation_speed = Float32[]
 
     if ropt.parallelism in (:multiprocessing, :multithreading)
         for j in 1:nout, i in 1:(options.populations)
@@ -916,6 +960,8 @@ function _main_search_loop!(
             # Dominating pareto curve - must be better than all simpler equations
             dominating = calculate_pareto_frontier(state.halls_of_fame[j])
 
+            communicate_with_python(state.fifo_out, state.fifo_in)
+
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)
             end
@@ -989,7 +1035,7 @@ function _main_search_loop!(
                     only(state.halls_of_fame),
                     only(datasets),
                     options,
-                    equation_speed,
+                    state.equation_speed,
                     head_node_occupation,
                     ropt.parallelism,
                 )
@@ -1008,10 +1054,10 @@ function _main_search_loop!(
                 s - num_evals_last, s
             end
             current_speed = num_evals_since_last / elapsed_since_speed_recording
-            push!(equation_speed, current_speed)
+            push!(state.equation_speed, current_speed)
             average_over_m_measurements = 20 # 20 second running average
-            if length(equation_speed) > average_over_m_measurements
-                deleteat!(equation_speed, 1)
+            if length(state.equation_speed) > average_over_m_measurements
+                deleteat!(state.equation_speed, 1)
             end
             last_speed_recording_time = time()
         end
@@ -1022,7 +1068,7 @@ function _main_search_loop!(
         elapsed = time() - last_print_time
         # Update if time has passed
         if elapsed > print_every_n_seconds
-            if ropt.verbosity > 0 && !ropt.progress && length(equation_speed) > 0
+            if ropt.verbosity > 0 && !ropt.progress && length(state.equation_speed) > 0
 
                 # Dominating pareto curve - must be better than all simpler equations
                 head_node_occupation = estimate_work_fraction(resource_monitor)
@@ -1031,7 +1077,7 @@ function _main_search_loop!(
                     state.halls_of_fame,
                     datasets;
                     options,
-                    equation_speed,
+                    state.equation_speed,
                     total_cycles,
                     state.cycles_remaining,
                     head_node_occupation,
@@ -1181,6 +1227,15 @@ function _info_dump(
             println("  - ", output_file)
         end
     end
+
+    if length(state.equation_speed) > 0
+        average_speed = sum(state.equation_speed) / length(state.equation_speed)
+        @info @sprintf(
+            "Average speed: %-5.2e full dataset evaluations per second.",
+            round(average_speed, sigdigits=3)
+        )
+    end
+
     return nothing
 end
 

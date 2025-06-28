@@ -231,6 +231,7 @@ using DispatchDoctor: @stable
     include("TemplateExpression.jl")
     include("TemplateExpressionMacro.jl")
     include("ParametricExpression.jl")
+    include("PSRNutils.jl")
 end
 
 using .CoreModule:
@@ -960,7 +961,7 @@ function _main_search_loop!(
             # Dominating pareto curve - must be better than all simpler equations
             dominating = calculate_pareto_frontier(state.halls_of_fame[j])
 
-            communicate_with_python(state.fifo_out, state.fifo_in)
+            communicate_with_python(state.fifo_out, state.fifo_in) ######################################################## kk TODO
 
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)

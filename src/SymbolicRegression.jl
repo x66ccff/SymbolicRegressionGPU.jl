@@ -564,27 +564,95 @@ function equation_search(
     return _equation_search(datasets, _runtime_options, options, saved_state)
 end
 
-function communicate_with_python(fifo_out, fifo_in)
+"""
+序列化并发送一个数组到指定的IO流。
+协议:
+1. 写入维度数 (Int64)
+2. 依次写入每个维度的大小 (Int64)
+3. 写入整个数组的原始数据
+"""
+function send_array(fifo_out::IO, arr::AbstractArray{<:AbstractFloat})
+    # 确保数据类型是 Float64，与 Python 端匹配
+    arr_f64 = convert(Array{Float64}, arr)
+
+    # 1. 发送维度数量
+    num_dims = Int64(ndims(arr_f64))
+    write(fifo_out, num_dims)
+
+    # 2. 发送每个维度的大小
+    dims = Int64.(size(arr_f64))
+    
+    # ---- 这是修正的部分 ----
+    # 错误行：write(fifo_out, dims) -> 不能直接写入元组
+    # 修正：遍历元组，将每个维度的大小单独写入
+    for d in dims
+        write(fifo_out, d)
+    end
+    # -------------------------
+
+    # 3. 发送扁平化的数组数据
+    # Julia 的 write 函数可以直接处理数组，它会按列主序（column-major）写入
+    write(fifo_out, arr_f64)
+end
+
+# send_array 函数保持不变，是正确的
+
+function communicate_with_python(
+    fifo_out::Any,
+    fifo_in::Any,
+    X_mapped_sampled::Matrix{<:AbstractFloat},
+    y_sampled::Vector{<:AbstractFloat}
+)
     try
-        # Send a random float to Python
-        test_num = rand(Float64)
-        #println("Julia: Sending ", test_num)
-        write(fifo_out, test_num)
+        # ----- 发送数据到 Python -----
+
+        # !!! 这是关键的补充部分 !!!
+        # Python 正在等待一个触发值，所以我们必须发送一个。
+        trigger_value = rand(Float64)
+        write(fifo_out, trigger_value)
+        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        # 发送矩阵 X (这部分不变)
+        send_array(fifo_out, X_mapped_sampled)
+
+        # 发送向量 y (这部分不变)
+        send_array(fifo_out, y_sampled)
+        
+        # 确保所有数据都被发送
         flush(fifo_out)
 
-        # Non-blocking read from Python
-        if bytesavailable(fifo_in) > 0
-            received_num = read(fifo_in, Float64)
-            #println("Julia: Received ", received_num)
-            open("julia_get.log", "a") do f
-                write(f, string(received_num) * "\n")
-            end
+        # ----- 从 Python 接收计算结果 -----
+        # 现在 Python 会执行计算并返回一个结果
+        # 使用阻塞 read 来等待结果是合理的
+        # 注意：不再使用 bytesavailable，因为我们确定对方会发送数据
+        calculation_result = read(fifo_in, Float64)
+        open("julia_get.log", "a") do f
+            write(f, "Received calculation result from Python: " * string(calculation_result) * "\n")
         end
+        
     catch e
-        # Non-critical error, so just print it
-        #println("Communication error: ", e)
+        @warn "Communication error in Julia" exception=(e, catch_backtrace())
     end
 end
+
+# --- 使用示例 ---
+# 在你的主程序中，你需要像这样调用它：
+
+# 假设 fifo_out 和 fifo_in 已经打开
+# a = open("python_to_julia_pipe", "r")
+# b = open("julia_to_python_pipe", "w")
+
+# # 创建一些示例数据
+# X_data = rand(Float32, 100, 5) # 使用 Float32 很常见
+# y_data = rand(Float32, 100)
+
+# # 调用函数
+# communicate_with_python(b, a, X_data, y_data)
+
+# # 关闭管道
+# close(a)
+# close(b)
+
 
 @noinline function _equation_search(
     datasets::Vector{D}, ropt::AbstractRuntimeOptions, options::AbstractOptions, saved_state
@@ -982,7 +1050,12 @@ function _main_search_loop!(
 
 
 
-            communicate_with_python(state.fifo_out, state.fifo_in) ######################################################## kk TODO
+            communicate_with_python(
+                state.fifo_out,
+                state.fifo_in,
+                X_mapped_sampled,
+                y_sampled
+            ) ######################################################## kk TODO
 
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)

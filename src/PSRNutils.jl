@@ -81,7 +81,7 @@ function select_top_subtrees(
     while length(result) < n
         # if isempty(available_features)
             # 如果没有可用的feature了，就生成随机的树
-            # push!(result, Node(Float32; val=rand(-5:5)))
+            # push!(result, Node(FloatType; val=rand(-5:5)))
         tree = gen_random_tree(
             rand(1:5),                     # length
             options,              # options
@@ -95,7 +95,7 @@ function select_top_subtrees(
         # else
         #     # 随机选择一个未使用的feature
         #     feature = rand(available_features)
-        #     tree = Node(Float32; feature=feature)
+        #     tree = Node(FloatType; feature=feature)
             
         #     if !(tree in result)
         #         push!(result, tree)
@@ -279,6 +279,7 @@ function psrn_preprocess(
     n_variables::Int,
     max_samples::Int,
 )
+    FloatType = Float32
 
     common_subtrees = analyze_common_subtrees(dominating_trees, options)
     top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
@@ -318,8 +319,8 @@ function psrn_preprocess(
     # add debug info
     # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
     # to cuda 0
-    X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
-    y_sampled = Float32.(y_sampled) # for saving memory
+    X_mapped_sampled = FloatType.(X_mapped_sampled) # for saving memory
+    y_sampled = FloatType.(y_sampled) # for saving memory
 
     n_variables = size(X_mapped_sampled, 2)
     variable_names = ["x$i" for i in 1:n_variables]
@@ -327,7 +328,7 @@ function psrn_preprocess(
         # Variable expressions are used by default
         [
             Expression(
-                Node(Float32; feature=i);
+                Node(FloatType; feature=i);
                 operators=options.operators,
                 variable_names=variable_names,
             ) for i in 1:n_variables

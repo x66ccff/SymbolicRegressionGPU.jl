@@ -350,6 +350,8 @@ using .ExpressionBuilderModule: embed_metadata, strip_metadata
 using .ParametricExpressionModule: ParametricExpressionSpec
 using .TemplateExpressionMacroModule: @template_spec
 
+# using .PSRNutils: psrn_preprocess
+
 @stable default_mode = "disable" begin
     include("deprecates.jl")
     include("Configure.jl")
@@ -960,6 +962,25 @@ function _main_search_loop!(
 
             # Dominating pareto curve - must be better than all simpler equations
             dominating = calculate_pareto_frontier(state.halls_of_fame[j])
+
+            ##################################################################################################################
+
+            N_PSRN_INPUT = 5
+            n_variables = 3
+            n_top = 10
+            max_samples = 20
+            X_mapped_sampled, y_sampled, current_expr_ls = psrn_preprocess(
+                            dominating,
+                            dataset,
+                            options,
+                            N_PSRN_INPUT,
+                            n_variables,
+                            max_samples
+                        )
+            @show X_mapped_sampled, y_sampled
+            # @show
+
+
 
             communicate_with_python(state.fifo_out, state.fifo_in) ######################################################## kk TODO
 

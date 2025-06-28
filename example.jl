@@ -1,6 +1,7 @@
 using SymbolicRegression
 
-X = randn(Float32, 5, 10000)
+X = randn(Float32, 5, 10000) # speed: ~2e+03 for default ~1e+04 for -t 16
+# X = randn(Float32, 5, 100) # speed: ~1e+05 for default ~4e+05 for -t 16
 y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
 
 options = SymbolicRegression.Options(;

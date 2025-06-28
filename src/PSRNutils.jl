@@ -1,6 +1,7 @@
 
 using Symbolics: expand, flatten_fractions, quick_cancel
 using ..CoreModule: Dataset, AbstractOptions, Options
+using Random
 
 function get_used_variables(node, var_names)
     used_vars = Set{String}()
@@ -173,7 +174,7 @@ end
     Dict{Node, Float64}
 其中键是子树节点，值是该子树节点所对应的打分。
 """
-function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
+function analyze_common_subtrees(trees::Any, options::Options)
     # 为每个子树同时记录：
     #   - 出现次数 count（若你还需要对出现次数进行筛选，可继续保留 count）
     #   - 累加的占比得分 ratio_score
@@ -185,7 +186,7 @@ function analyze_common_subtrees(trees::Vector{<:Expression}, options::Options)
         if !isnothing(expr.tree)
             parent_complexity = compute_complexity(expr.tree, options)
             # 获取该表达式的所有子树
-            subtrees = get_subtrees(expr)
+            subtrees = get_subtrees(expr.tree)
 
             for st in subtrees
                 st_comp = compute_complexity(st, options)
@@ -269,186 +270,89 @@ get_subtrees(x::Symbol) = Node[]
 
 
 
-# function start_psrn_task(
-#     manager::PSRNManager,
-#     dominating_trees::Vector{<:Expression},
-#     dataset::Dataset,
-#     options::AbstractOptions,
-#     N_PSRN_INPUT::Int,
-#     n_variables::Int
-# )
-#     if manager.current_task !== nothing && !istaskdone(manager.current_task)
-#         return nothing
-#     end
+function psrn_preprocess(
+    # dominating_trees::Vector{<:Expression},
+    dominating_trees::Any,
+    dataset::Dataset,
+    options::AbstractOptions,
+    N_PSRN_INPUT::Int,
+    n_variables::Int,
+    max_samples::Int,
+)
 
-#     return manager.current_task = Threads.@spawn :interactive begin
-#         try
-#             manager.call_count += 1
-#             @info "Starting PSRN computation ($(manager.call_count ÷ 1)/1 times)"
-#             common_subtrees = analyze_common_subtrees(dominating_trees, options)
-#             top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
-#             shuffle!(top_subtrees)
+    common_subtrees = analyze_common_subtrees(dominating_trees, options)
+    top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
+    shuffle!(top_subtrees)
 
-#             X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
-            
-#             # add downsampling 
-#             n_samples = size(X_mapped, 1)
-#             if n_samples > manager.max_samples
-#                 # random sample
-#                 sample_indices = randperm(n_samples)[1:(manager.max_samples)]
-#                 X_mapped_sampled = X_mapped[sample_indices, :]
+    # end 
+    @info "Selected subtrees: ================ "
+    @info "👇"
+    for expr in top_subtrees
+        # expr type is node
+        string = string_tree(expr, options)
+        @info string
+    end 
+    @info "👆"
 
-#                 # check the dimension of dataset.y
-#                 y_dims = size(dataset.y)
-#                 if length(y_dims) == 1
-#                     y_sampled = dataset.y[sample_indices]
-#                 else
-#                     y_sampled = dataset.y[:, sample_indices]
-#                 end
-#             else
-#                 X_mapped_sampled = X_mapped
-#                 y_sampled = dataset.y
-#             end
+    X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
-#             X_mapped_sampled = Float16.(X_mapped_sampled) # for saving memory
-#             y_sampled = Float16.(y_sampled) # for saving memory
+    # add downsampling 
+    n_samples = size(X_mapped, 1)
+    if n_samples > max_samples
+        # random sample
+        sample_indices = randperm(n_samples)[1:(max_samples)]
+        X_mapped_sampled = X_mapped[sample_indices, :]
 
-#             # 临时禁用Python GC以提高性能
-#             PythonCall.GC.disable()
+        # check the dimension of dataset.y
+        y_dims = size(dataset.y)
+        if length(y_dims) == 1
+            y_sampled = dataset.y[sample_indices]
+        else
+            y_sampled = dataset.y[:, sample_indices]
+        end
+    else
+        X_mapped_sampled = X_mapped
+        y_sampled = dataset.y
+    end
 
-#             device_id = 0 # TODO - temporary fix the PSRN to use GPU 0
-#             row, col = size(X_mapped_sampled)
-#             # 将转置结果材料化为实际的数组
-#             X_mapped_sampled_pyarray = array_class_ref[]('f', collect(vec(X_mapped_sampled')))
-#             y_sampled_pyarray = array_class_ref[]('f', vec(y_sampled))
-#             X_mapped_sampled_pytorch = torch_tensor_ref[](X_mapped_sampled_pyarray).to(now_device[])
-#             X_mapped_sampled_pytorch = X_mapped_sampled_pytorch.reshape(col, row)  # 注意：维度交换
-#             y_sampled_pytorch = torch_tensor_ref[](y_sampled_pyarray).to(now_device[])
-            
-#             n_variables = size(X_mapped_sampled, 2)
-#             variable_names = ["x$i" for i in 1:n_variables]
-#             manager.net.current_expr_ls = if isnothing(top_subtrees)
-#                 # Variable expressions are used by default
-#                 [
-#                     Expression(
-#                         Node(Float32; feature=i);
-#                         operators=options.operators,
-#                         variable_names=variable_names,
-#                     ) for i in 1:n_variables
-#                 ]
-#             elseif top_subtrees isa Vector{Node}
-#                 # If it is a Node array, convert it to an Expression array
-#                 [
-#                     Expression(
-#                         node; operators=options.operators, variable_names=variable_names
-#                     ) for node in top_subtrees
-#                 ]
-#             elseif top_subtrees isa Vector{Expression}
-#                 # If it is already an Expression array, use it directly
-#                 top_subtrees
-#             else
-#                 throw(
-#                     ArgumentError(
-#                         "top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}",
-#                     ),
-#                 )
-#             end
-            
-#             @info "✨✨"
-#             for expr in manager.net.current_expr_ls
-#                 @info "✨ $expr"
-#             end
+    # add debug info
+    # @info "Dimensions:" X_mapped_size=size(X_mapped_sampled) y_size=size(y_sampled)
+    # to cuda 0
+    X_mapped_sampled = Float32.(X_mapped_sampled) # for saving memory
+    y_sampled = Float32.(y_sampled) # for saving memory
 
-#             sum_ = torch[].zeros((1, manager.net.out_dim), device=manager.net.device, dtype=y_sampled_pytorch.dtype)
-#             for i in 0:row-1
-#                 H = manager.net.forward(X_mapped_sampled_pytorch[i].reshape(1, -1))
-#                 diff = H - y_sampled_pytorch[i]
+    n_variables = size(X_mapped_sampled, 2)
+    variable_names = ["x$i" for i in 1:n_variables]
+    current_expr_ls = if isnothing(top_subtrees)
+        # Variable expressions are used by default
+        [
+            Expression(
+                Node(Float32; feature=i);
+                operators=options.operators,
+                variable_names=variable_names,
+            ) for i in 1:n_variables
+        ]
+    elseif top_subtrees isa Vector{Node}
+        # If it is a Node array, convert it to an Expression array
+        [
+            Expression(
+                node; operators=options.operators, variable_names=variable_names
+            ) for node in top_subtrees
+        ]
+    elseif top_subtrees isa Vector{Expression}
+        # If it is already an Expression array, use it directly
+        top_subtrees
+    else
+        throw(
+            ArgumentError(
+                "top_subtrees must be Nothing, Vector{Node}, or Vector{Expression}",
+            ),
+        )
+    end
 
-#                 PythonCall.pydel!(H)
-#                 diff.mul_(diff)
-#                 sum_.add_(diff)
-
-#                 PythonCall.pydel!(diff)
-#                 # 删除了循环内的 GC.gc()
-#             end
-#             sum_ = sum_.reshape(-1)
-
-#             ind1 = torch[].isnan(sum_)
-#             ind2 = torch[].isinf(sum_)
-
-#             sum_[ind1] = pybuiltins.float(Py("inf"))
-#             sum_[ind2] = pybuiltins.float(Py("inf"))
-
-#             PythonCall.pydel!(ind1)
-#             PythonCall.pydel!(ind2)
-
-#             values, indices = torch[].topk(sum_, 20, largest=Py(false), sorted=Py(true))
-#             PythonCall.pydel!(sum_)
-#             best_expressions = Expression[]
-
-#             operators = options.operators
-
-#             for i in 0:pylen(indices)-1
-#                 expr = manager.net.get_expr(i)
-#                 expr_jl = pyconvert(Expression, expr)
-#                 push!(best_expressions, expr_jl)
-#             end 
-
-#             put!(manager.channel, best_expressions)
-
-#             # 重新启用Python GC
-#             PythonCall.GC.enable()
-
-#             PythonCall.pydel!(X_mapped_sampled_pytorch)
-#             PythonCall.pydel!(y_sampled_pytorch)
-#             PythonCall.pydel!(indices)
-#             PythonCall.pydel!(values)
-            
-#             # 只在每10次调用时才进行GC
-#             if manager.call_count % 10 == 0
-#                 GC.gc(false)  # 使用增量GC
-#             end
-#         catch e
-#             bt = stacktrace(catch_backtrace())
-#             @error """
-#             PSRN task execution error:
-#             Error type: $(typeof(e))
-#             Error message: $e
-#             Error location: $(bt[1])
-#             Full stack:
-#             $(join(string.(bt), "\n"))
-#             """
-#             # 确保在错误情况下也重新启用 Python GC
-#             PythonCall.GC.enable()
-#             GC.gc()
-#         end
-#     end
-# end
-
-# # Check and process PSRN results
-# function process_psrn_results!(
-#     manager::PSRNManager,
-#     hall_of_fame::HallOfFame,
-#     dataset::Dataset,
-#     options::AbstractOptions,
-# )
-#     while isready(manager.channel)
-#         new_expressions = take!(manager.channel)
-#         if !isempty(new_expressions)
-#             for psrn_expr in new_expressions
-#                 # Create a new Expression using target type
-#                 converted_expr = Expression(
-#                     psrn_expr.tree;  # Only keep the tree structure
-#                     operators=nothing,  # Set to nothing
-#                     variable_names=nothing,  # Set to nothing
-#                 )
-
-#                 member = PopMember(dataset, converted_expr, options; deterministic=false)
-#                 # @info "PSRN member: $member"
-#                 # @info "type of member: $(typeof(member))"
-#                 update_hall_of_fame!(hall_of_fame, [member], options)
-#             end
-#             @info "Added PSRN results to hall of fame"
-#         end
-#     end
-# end
+    # best_expressions = get_best_expr_and_MSE_topk(
+    #     X_mapped_sampled, y_sampled
+    # )
+    return X_mapped_sampled, y_sampled, current_expr_ls
+    # return best_expressions
+end

@@ -587,7 +587,7 @@ end
     datasets::Vector{D}, ropt::AbstractRuntimeOptions, options::AbstractOptions, saved_state
 ) where {D<:Dataset}
     python_executable = "/home/kent/anaconda3/envs/PSRN/bin/python"
-    script_path = joinpath(@__DIR__, "heavy_cpu.py")
+    script_path = joinpath(@__DIR__, "PSRN.py")
     error_log = "python_errors.log"
     python_process = run(pipeline(`$python_executable -u $script_path`, stderr=error_log); wait=false)
     

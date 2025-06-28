@@ -13,9 +13,10 @@ def cpu_intensive_calculation(value):
     """Simulates a CPU-intensive task for a few seconds."""
     sys.stdout.write(f"Python: Received {value}, starting calculation...\n")
     sys.stdout.flush()
-    time.sleep(2) # Simulate work
+    # time.sleep(2) # Simulate work
     # result = value + 1.0
-    result = value + torch.randint(0,10, (1, 100000)).cuda()
+    for i in range(100):
+        result = value + torch.randn((1, 10_0000_0000), device='cuda')
     result = result[0, 0].item()
     sys.stdout.write(f"Python: Calculation finished. Sending back {result}\n")
     sys.stdout.flush()

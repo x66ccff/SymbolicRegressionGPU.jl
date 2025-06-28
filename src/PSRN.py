@@ -5,9 +5,94 @@
 import os
 import struct
 import sys
+sys.path.append(".")
 import traceback
 import numpy as np
 import torch
+
+
+
+
+
+
+gpu_index = 0 
+os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+
+
+from PSRNmodels import PSRN
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+
+# print(operators)
+# operators = eval(operators)
+operators = ['Add','Mul','Sub','Div','Sin','Cos','Exp','Log']
+n_psrn_input = 5
+print(operators)
+
+cnt_success = 0
+sum_time = 0
+
+variables_name = [f"x_{i}" for i in range(n_psrn_input)]
+target_name = ["y"]
+
+# Input = df.values[:, :-1].reshape(len(df), -1)
+# Output = df.values[:, -1].reshape(len(df), 1)
+
+# Input = torch.from_numpy(Input).to(device).to(torch.float32)
+# Output = torch.from_numpy(Output).to(device).to(torch.float32)
+
+# print(Input.shape, Output.shape)
+# print(Input.dtype, Output.dtype)
+
+n_symbol_layers = 2
+use_constant = False
+psrn = PSRN(
+            n_variables=n_psrn_input,
+            operators=operators,
+            n_symbol_layers=n_symbol_layers,
+            dr_mask=None,
+            device=device,
+        )
+
+    # start = time.time()
+    # flag, pareto_ls = regressor.fit(
+    #     Input,
+    #     Output,
+    #     n_down_sample=hp["n_down_sample"],
+    #     use_threshold=False,  # Not use threshold when running benchmarks
+    #     threshold=1e-20,
+    #     probe=probe,  # expression probe, string, stop if probe in pf
+    #     prun_const=True,
+    #     prun_ndigit=2,
+    #     top_k=topk,
+    # )
+    # end = time.time()
+    # time_cost = end - start
+
+    # crits = ["reward", "mse"]
+
+    # for crit in crits:
+    #     print("Pareto Front sort by {}".format(crit))
+    #     pareto_ls = regressor.display_expr_table(sort_by=crit)
+
+    # expr_str, reward, loss, complexity = pareto_ls[0]
+    # expr_sympy = sp.simplify(expr_str)
+
+    # print(expr_str)
+
+    # print("time_cost", time_cost)
+    # if flag:
+    #     print("[*** Found Expr ! ***]")
+    #     cnt_success += 1
+    # sum_time += time_cost
+
+    # print(expr_sympy)
+
+
+
+
+
 
 # ... (常量和 read_array_from_pipe 函数保持不变) ...
 JULIA_TO_PYTHON_PIPE = 'julia_to_python_pipe'
@@ -97,6 +182,7 @@ def main():
                 
                 # 2. 记录接收信息
                 sys.stdout.write(f"Received X shape {X_np.shape}, y shape {y_np.shape}\n")
+                # sys.stdout.write(f"Received X {X_np}, y {y_np}\n")
                 X_torch = torch.from_numpy(X_np).to('cuda')
                 y_torch = torch.from_numpy(y_np).to('cuda')
                 sys.stdout.write(f"Successfully converted to CUDA tensors.\n"); sys.stdout.flush()

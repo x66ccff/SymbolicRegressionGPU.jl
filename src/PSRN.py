@@ -104,45 +104,6 @@ def send_string_list(fifo_write, string_list):
         traceback.print_exc(file=sys.stderr)
         raise  # 重新抛出异常，让调用者知道发送失败
 
-def robust_gpu_calculation(value, tensor_size=1_000_000, iterations=100):
-    """
-    一个更健壮的 GPU 密集型任务版本。
-    """
-    sys.stdout.write(
-        f"Python: Starting robust calculation with trigger={value}, "
-        f"tensor_size={tensor_size}, iterations={iterations}\n"
-    )
-    
-    if torch.cuda.is_available():
-        sys.stdout.write(f"  Initial VRAM Used: {torch.cuda.memory_allocated() / 1e6:.2f} MB\n")
-    sys.stdout.flush()
-
-    result = torch.tensor(value, device='cuda', dtype=torch.float64)
-    
-    for i in range(iterations):
-        try:
-            noise = torch.randn(tensor_size, device='cuda', dtype=torch.float64)
-            result += torch.mean(noise)
-            del noise
-
-            if (i + 1) % 20 == 0:
-                sys.stdout.write(f"  Calculation progress: {i+1}/{iterations}\n")
-                sys.stdout.flush()
-                torch.cuda.empty_cache()
-
-        except torch.cuda.OutOfMemoryError:
-            sys.stderr.write(f"FATAL: CUDA Out of Memory during iteration {i+1}. "
-                             f"Attempted to allocate for a tensor of size {tensor_size}.\n")
-            return float('-inf') 
-            
-    final_result = result.item()
-    
-    if torch.cuda.is_available():
-        sys.stdout.write(f"  Final VRAM Used: {torch.cuda.memory_allocated() / 1e6:.2f} MB\n")
-    sys.stdout.write(f"Python: Calculation finished. Sending back {final_result}\n")
-    sys.stdout.flush()
-    return final_result
-
 def main():
     sys.stdout = open(STDOUT_LOG_FILE, 'w')
     sys.stderr = open(ERROR_LOG_FILE, 'w')
@@ -188,9 +149,6 @@ def main():
                     y_torch = torch.from_numpy(y_np).to('cuda')
                     sys.stdout.write(f"Successfully converted to CUDA tensors.\n")
                     sys.stdout.flush()
-
-                    # 3. 执行计算任务
-                    result = robust_gpu_calculation(trigger_value, tensor_size=1_000_000, iterations=100)
                     
                     psrn.current_expr_ls = variables_name
                     n_top = 10

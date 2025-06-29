@@ -26,7 +26,7 @@ print(device)
 
 # print(operators)
 # operators = eval(operators)
-operators = ['Add','Mul','Sub','Div','Sin','Cos','Exp','Log']
+operators = ['Add','Mul','SemiSub','SemiDiv','Sin','Cos','Exp','Log']
 n_psrn_input = 5
 print(operators)
 
@@ -45,7 +45,7 @@ target_name = ["y"]
 # print(Input.shape, Output.shape)
 # print(Input.dtype, Output.dtype)
 
-n_symbol_layers = 2
+n_symbol_layers = 3
 use_constant = False
 psrn = PSRN(
             n_variables=n_psrn_input,
@@ -191,6 +191,10 @@ def main():
                 # !!! 从一个较小的值开始测试 !!!
                 # 如果 100万 仍然崩溃, 尝试 100_000 或更小
                 result = robust_gpu_calculation(trigger_value, tensor_size=1_000_000, iterations=100)
+                
+                psrn.current_expr_ls = variables_name
+                n_top = 10
+                expr_best_ls, MSE_min_ls = psrn.get_best_expr_and_MSE_topk(X_torch, y_torch, n_top)
                 
                 # 4. 发送结果
                 packed_result = struct.pack('d', result)

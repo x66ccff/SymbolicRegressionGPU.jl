@@ -621,13 +621,18 @@ function communicate_with_python(
         # 确保所有数据都被发送
         flush(fifo_out)
 
-        # ----- 从 Python 接收计算结果 -----
-        # 现在 Python 会执行计算并返回一个结果
-        # 使用阻塞 read 来等待结果是合理的
-        # 注意：不再使用 bytesavailable，因为我们确定对方会发送数据
-        calculation_result = read(fifo_in, Float64)
-        open("julia_get.log", "a") do f
-            write(f, "Received calculation result from Python: " * string(calculation_result) * "\n")
+        # ----- 从 Python 接收计算结果 (非阻塞) -----
+        # 检查是否有数据可读
+        if bytesavailable(fifo_in) >= sizeof(Float64)
+            calculation_result = read(fifo_in, Float64)
+            open("julia_get.log", "a") do f
+                write(f, "Received calculation result from Python: " * string(calculation_result) * "\n")
+            end
+        else
+            # Python 还没有准备好数据，直接跳过
+            open("julia_get.log", "a") do f
+                write(f, "No data available from Python, skipping...\n")
+            end
         end
         
     catch e

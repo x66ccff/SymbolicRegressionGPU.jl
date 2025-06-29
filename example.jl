@@ -9,7 +9,9 @@ X = randn(Float32, 5, 10000) # speed: ~2e+03 for default ~1e+04 for -t 16
 y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
 
 options = SymbolicRegression.Options(;
-    binary_operators=[+, *, /, -], unary_operators=[cos, exp, sin, log], timeout_in_seconds=30
+    binary_operators=[+, *, /, -],
+     unary_operators=[cos, exp, sin, log],
+    timeout_in_seconds=30
 )
 
 hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)

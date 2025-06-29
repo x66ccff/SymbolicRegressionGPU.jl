@@ -5,6 +5,7 @@ sys.path.append(".")
 import traceback
 import numpy as np
 import torch
+import time
 
 gpu_index = 0 
 os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
@@ -102,7 +103,18 @@ def send_string_list(fifo_write, string_list):
     except Exception as e:
         sys.stderr.write(f"Error in send_string_list: {e}\n")
         traceback.print_exc(file=sys.stderr)
-        raise  # 重新抛出异常，让调用者知道发送失败
+        raise
+
+def signal_result_ready(request_id):
+    """创建信号文件告知Julia结果已准备好"""
+    signal_filename = f"python_result_ready_{request_id:06d}"
+    try:
+        with open(signal_filename, 'w') as f:
+            f.write(str(time.time()))
+        sys.stdout.write(f"Created signal file: {signal_filename}\n")
+        sys.stdout.flush()
+    except Exception as e:
+        sys.stderr.write(f"Error creating signal file: {e}\n")
 
 def main():
     sys.stdout = open(STDOUT_LOG_FILE, 'w')
@@ -119,6 +131,7 @@ def main():
              open(PYTHON_TO_JULIA_PIPE, 'wb') as fifo_write:
             sys.stdout.write("Python ROBUST process started and listening...\n")
             sys.stdout.flush()
+            request_count = 0
             while True:
                 sys.stdout.write("\nWaiting for new job...\n")
                 sys.stdout.flush()
@@ -136,8 +149,10 @@ def main():
                     if X_np is None or y_np is None: 
                         break
                     
+                    request_count += 1
+                    
                     # 2. 记录接收信息并转换为torch张量
-                    sys.stdout.write(f"Received X shape {X_np.shape}, y shape {y_np.shape}\n")
+                    sys.stdout.write(f"Processing request #{request_count}: Received X shape {X_np.shape}, y shape {y_np.shape}\n")
                     
                     # 修复3: 确保NumPy数组可写后再转换为torch张量
                     if not X_np.flags.writeable:
@@ -147,20 +162,23 @@ def main():
                     
                     X_torch = torch.from_numpy(X_np).to('cuda')
                     y_torch = torch.from_numpy(y_np).to('cuda')
-                    sys.stdout.write(f"Successfully converted to CUDA tensors.\n")
+                    sys.stdout.write(f"Successfully converted to CUDA tensors for request #{request_count}.\n")
                     sys.stdout.flush()
                     
                     psrn.current_expr_ls = variables_name
                     n_top = 10
                     expr_best_ls, MSE_min_ls = psrn.get_best_expr_and_MSE_topk(X_torch, y_torch, n_top)
-                    sys.stdout.write(f"Received expr_best_ls {expr_best_ls}, MSE_min_ls {MSE_min_ls}\n")
+                    sys.stdout.write(f"Request #{request_count} - Received expr_best_ls {expr_best_ls}, MSE_min_ls {MSE_min_ls}\n")
                     
                     # 4. 发送字符串列表结果
-                    sys.stdout.write("About to send string list to Julia...\n")
+                    sys.stdout.write(f"About to send string list to Julia for request #{request_count}...\n")
                     sys.stdout.flush()
                     send_string_list(fifo_write, expr_best_ls)
-                    sys.stdout.write("Finished sending string list to Julia\n")
+                    sys.stdout.write(f"Finished sending string list to Julia for request #{request_count}\n")
                     sys.stdout.flush()
+                    
+                    # 5. 创建信号文件通知Julia结果已准备好
+                    signal_result_ready(request_count)
                     
                 except BrokenPipeError:
                     sys.stdout.write("Broken pipe detected, Julia process may have terminated\n")
@@ -168,7 +186,6 @@ def main():
                 except Exception as loop_error:
                     sys.stderr.write(f"Error in processing loop: {loop_error}\n")
                     traceback.print_exc(file=sys.stderr)
-                    # 继续下一次循环而不是退出
                     continue
                 
     except Exception as e:

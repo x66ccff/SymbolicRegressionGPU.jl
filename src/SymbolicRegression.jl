@@ -563,6 +563,15 @@ function equation_search(
     # Underscores here mean that we have mutated the variable
     return _equation_search(datasets, _runtime_options, options, saved_state)
 end
+# 全局变量来跟踪异步状态
+mutable struct AsyncState
+    pending_requests::Int64
+    last_signal_check::Int64
+end
+
+# 全局状态实例
+const ASYNC_STATE = AsyncState(0, 0)
+
 """
 序列化并发送一个数组到指定的IO流。
 协议:
@@ -629,6 +638,42 @@ function receive_string_list(fifo_in::IO)
 end
 
 """
+检查是否有新的结果可读
+"""
+function check_for_results(fifo_in::IO)
+    signal_files = filter(x -> startswith(x, "python_result_ready_"), readdir("."))
+    
+    if isempty(signal_files)
+        return nothing
+    end
+    
+    # 按文件名排序，处理最早的信号
+    sort!(signal_files)
+    oldest_signal = signal_files[1]
+    
+    try
+        # 读取结果
+        println("Julia: Found signal file $oldest_signal, reading result...")
+        expr_list = receive_string_list(fifo_in)
+        
+        # 删除信号文件
+        rm(oldest_signal)
+        ASYNC_STATE.pending_requests = max(0, ASYNC_STATE.pending_requests - 1)
+        
+        return expr_list
+        
+    catch e
+        @warn "Error reading result after signal" exception=(e, catch_backtrace())
+        # 即使读取失败也要删除信号文件，避免死循环
+        try
+            rm(oldest_signal)
+        catch
+        end
+        return String[]
+    end
+end
+
+"""
 尝试读取数据，使用阻塞读取而不是检查bytesavailable
 """
 function safe_receive_string_list(fifo_in::IO, timeout_seconds::Float64 = 30.0)
@@ -670,7 +715,33 @@ function communicate_with_python(
     y_sampled::Vector{<:AbstractFloat}
 )
     try
-        # ----- 发送数据到 Python -----
+        # 首先检查是否有之前的结果可读
+        expr_list = check_for_results(fifo_in)
+        
+        if expr_list !== nothing && !isempty(expr_list)
+            println("Julia: Successfully received $(length(expr_list)) expressions from previous request")
+            
+            # 打印接收到的字符串列表
+            println("Received expression list from Python:")
+            for (i, expr) in enumerate(expr_list)
+                println("  [$i]: $expr")
+            end
+            
+            open("julia_get.log", "a") do f
+                write(f, "Received expression list from Python:\n")
+                for (i, expr) in enumerate(expr_list)
+                    write(f, "  [$i]: $expr\n")
+                end
+                write(f, "\n")
+            end
+        else
+            # 没有可读取的数据
+            open("julia_get.log", "a") do f
+                write(f, "no data\n")
+            end
+        end
+        
+        # ----- 发送新的数据到 Python -----
 
         # !!! 这是关键的补充部分 !!!
         # Python 正在等待一个触发值，所以我们必须发送一个。
@@ -687,37 +758,12 @@ function communicate_with_python(
         # 确保所有数据都被发送
         flush(fifo_out)
 
-        println("Julia: Data sent to Python, waiting for response...")
-        open("julia_get.log", "a") do f
-            write(f, "Julia: Data sent to Python, waiting for response...\n")
-        end
+        # 增加待处理请求计数
+        ASYNC_STATE.pending_requests += 1
 
-        # ----- 从 Python 接收字符串列表结果 -----
-        # 使用更健壮的读取方法
-        println("Julia: Attempting to read string list from Python...")
-        expr_list = safe_receive_string_list(fifo_in, 30.0)
-        
-        if !isempty(expr_list)
-            println("Julia: Successfully received $(length(expr_list)) expressions")
-            
-            # 打印接收到的字符串列表
-            println("Received expression list from Python:")
-            for (i, expr) in enumerate(expr_list)
-                println("  [$i]: $expr")
-            end
-            
-            open("julia_get.log", "a") do f
-                write(f, "Received expression list from Python:\n")
-                for (i, expr) in enumerate(expr_list)
-                    write(f, "  [$i]: $expr\n")
-                end
-                write(f, "\n")
-            end
-        else
-            println("Julia: Failed to receive data from Python or received empty list")
-            open("julia_get.log", "a") do f
-                write(f, "Julia: Failed to receive data from Python or received empty list\n")
-            end
+        println("Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), continuing without waiting...")
+        open("julia_get.log", "a") do f
+            write(f, "Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), continuing without waiting...\n")
         end
         
     catch e
@@ -745,7 +791,6 @@ end
 # close(a)
 # close(b)
 
-
 @noinline function _equation_search(
     datasets::Vector{D}, ropt::AbstractRuntimeOptions, options::AbstractOptions, saved_state
 ) where {D<:Dataset}
@@ -771,6 +816,17 @@ end
         _info_dump(state, datasets, ropt, options)
         return _format_output(state, datasets, ropt, options)
     finally
+        # 清理信号文件
+        signal_files = filter(x -> startswith(x, "python_result_ready_"), readdir("."))
+        for file in signal_files
+            try
+                rm(file)
+                @info "Cleaned up signal file: $file"
+            catch e
+                @warn "Failed to remove signal file $file: $e"
+            end
+        end
+        
         close(fifo_out)
         close(fifo_in)
         kill(python_process)

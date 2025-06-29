@@ -10,14 +10,8 @@ import traceback
 import numpy as np
 import torch
 
-
-
-
-
-
 gpu_index = 0 
 os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
-
 
 from PSRNmodels import PSRN
 
@@ -89,19 +83,12 @@ psrn = PSRN(
 
     # print(expr_sympy)
 
-
-
-
-
-
-# ... (常量和 read_array_from_pipe 函数保持不变) ...
 JULIA_TO_PYTHON_PIPE = 'julia_to_python_pipe'
 PYTHON_TO_JULIA_PIPE = 'python_to_julia_pipe'
 ERROR_LOG_FILE = 'python_errors.log'
 STDOUT_LOG_FILE = 'python_stdout.log'
 
 def read_array_from_pipe(fifo_read):
-    # (This function is correct, no changes needed)
     try:
         num_dims_data = fifo_read.read(8); num_dims = struct.unpack('q', num_dims_data)[0]
         shape_data = fifo_read.read(8 * num_dims); shape = struct.unpack(f'{num_dims}q', shape_data)
@@ -112,6 +99,49 @@ def read_array_from_pipe(fifo_read):
     except Exception as e:
         sys.stderr.write(f"CRITICAL ERROR in read_array_from_pipe: {e}\n"); traceback.print_exc(file=sys.stderr)
         return None
+
+def send_string_list(fifo_write, string_list):
+    """
+    序列化并发送字符串列表到指定的IO流。
+    协议:
+    1. 写入字符串列表长度 (Int64)
+    2. 对于每个字符串：
+       - 写入字符串长度 (Int64)
+       - 写入字符串的UTF-8字节
+    """
+    try:
+        # 1. 发送字符串列表长度
+        list_length = len(string_list)
+        packed_length = struct.pack('q', list_length)
+        fifo_write.write(packed_length)
+        sys.stdout.write(f"Sent list length: {list_length}\n")
+        sys.stdout.flush()
+        
+        # 2. 发送每个字符串
+        for i, s in enumerate(string_list):
+            # 将字符串转换为UTF-8字节
+            s_bytes = s.encode('utf-8')
+            # 发送字符串长度
+            str_length = len(s_bytes)
+            packed_str_length = struct.pack('q', str_length)
+            fifo_write.write(packed_str_length)
+            # 发送字符串内容
+            fifo_write.write(s_bytes)
+            sys.stdout.write(f"Sent string {i+1}/{list_length}, length: {str_length}\n")
+            sys.stdout.flush()
+            
+        sys.stdout.write(f"Sent string list with {list_length} strings\n")
+        sys.stdout.flush()
+        
+        # 强制刷新缓冲区
+        fifo_write.flush()
+        os.fsync(fifo_write.fileno())
+        sys.stdout.write("Flushed and synced data to Julia\n")
+        sys.stdout.flush()
+        
+    except Exception as e:
+        sys.stderr.write(f"Error in send_string_list: {e}\n")
+        traceback.print_exc(file=sys.stderr)
 
 def robust_gpu_calculation(value, tensor_size=1_000_000, iterations=100):
     """
@@ -163,48 +193,59 @@ def robust_gpu_calculation(value, tensor_size=1_000_000, iterations=100):
     return final_result
 
 def main():
-    # ... (stdout/stderr redirection, pipe creation is the same) ...
-    sys.stdout = open(STDOUT_LOG_FILE, 'w'); sys.stderr = open(ERROR_LOG_FILE, 'w')
-    if not torch.cuda.is_available(): sys.stdout.write("CUDA not available.\n"); return
+    sys.stdout = open(STDOUT_LOG_FILE, 'w')
+    sys.stderr = open(ERROR_LOG_FILE, 'w')
+    if not torch.cuda.is_available(): 
+        sys.stdout.write("CUDA not available.\n")
+        return
     try:
-        if not os.path.exists(JULIA_TO_PYTHON_PIPE): os.mkfifo(JULIA_TO_PYTHON_PIPE)
-        if not os.path.exists(PYTHON_TO_JULIA_PIPE): os.mkfifo(PYTHON_TO_JULIA_PIPE)
+        if not os.path.exists(JULIA_TO_PYTHON_PIPE): 
+            os.mkfifo(JULIA_TO_PYTHON_PIPE)
+        if not os.path.exists(PYTHON_TO_JULIA_PIPE): 
+            os.mkfifo(PYTHON_TO_JULIA_PIPE)
         with open(JULIA_TO_PYTHON_PIPE, 'rb') as fifo_read, \
              open(PYTHON_TO_JULIA_PIPE, 'wb') as fifo_write:
-            sys.stdout.write("Python ROBUST process started and listening...\n"); sys.stdout.flush()
+            sys.stdout.write("Python ROBUST process started and listening...\n")
+            sys.stdout.flush()
             while True:
-                sys.stdout.write("\nWaiting for new job...\n"); sys.stdout.flush()
+                sys.stdout.write("\nWaiting for new job...\n")
+                sys.stdout.flush()
                 # 1. 接收数据
-                trigger_data = fifo_read.read(8); trigger_value = struct.unpack('d', trigger_data)[0]
+                trigger_data = fifo_read.read(8)
+                trigger_value = struct.unpack('d', trigger_data)[0]
                 X_np = read_array_from_pipe(fifo_read)
                 y_np = read_array_from_pipe(fifo_read)
-                if X_np is None or y_np is None: break
+                if X_np is None or y_np is None: 
+                    break
                 
                 # 2. 记录接收信息
                 sys.stdout.write(f"Received X shape {X_np.shape}, y shape {y_np.shape}\n")
-                # sys.stdout.write(f"Received X {X_np}, y {y_np}\n")
                 X_torch = torch.from_numpy(X_np).to('cuda')
                 y_torch = torch.from_numpy(y_np).to('cuda')
-                sys.stdout.write(f"Successfully converted to CUDA tensors.\n"); sys.stdout.flush()
+                sys.stdout.write(f"Successfully converted to CUDA tensors.\n")
+                sys.stdout.flush()
 
                 # 3. 执行健壮的计算任务
-                # !!! 从一个较小的值开始测试 !!!
-                # 如果 100万 仍然崩溃, 尝试 100_000 或更小
                 result = robust_gpu_calculation(trigger_value, tensor_size=1_000_000, iterations=100)
                 
                 psrn.current_expr_ls = variables_name
                 n_top = 10
                 expr_best_ls, MSE_min_ls = psrn.get_best_expr_and_MSE_topk(X_torch, y_torch, n_top)
+                sys.stdout.write(f"Received expr_best_ls {expr_best_ls}, MSE_min_ls {MSE_min_ls}\n")
                 
-                # 4. 发送结果
-                packed_result = struct.pack('d', result)
-                fifo_write.write(packed_result)
-                fifo_write.flush()
+                # 4. 发送字符串列表结果 (替换原来的 Float64 结果)
+                sys.stdout.write("About to send string list to Julia...\n")
+                sys.stdout.flush()
+                send_string_list(fifo_write, expr_best_ls)
+                sys.stdout.write("Finished sending string list to Julia\n")
+                sys.stdout.flush()
+                
     except Exception as e:
         sys.stderr.write(f"Python script crashed in main loop: {e}\n")
         traceback.print_exc(file=sys.stderr)
     finally:
-        sys.stdout.close(); sys.stderr.close()
+        sys.stdout.close()
+        sys.stderr.close()
 
 if __name__ == "__main__":
     main()

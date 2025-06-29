@@ -563,7 +563,6 @@ function equation_search(
     # Underscores here mean that we have mutated the variable
     return _equation_search(datasets, _runtime_options, options, saved_state)
 end
-
 """
 序列化并发送一个数组到指定的IO流。
 协议:
@@ -595,7 +594,74 @@ function send_array(fifo_out::IO, arr::AbstractArray{<:AbstractFloat})
     write(fifo_out, arr_f64)
 end
 
-# send_array 函数保持不变，是正确的
+"""
+从指定的IO流接收并反序列化字符串列表。
+协议:
+1. 读取字符串列表长度 (Int64)
+2. 对于每个字符串：
+   - 读取字符串长度 (Int64)
+   - 读取字符串的UTF-8字节并转换为字符串
+"""
+function receive_string_list(fifo_in::IO)
+    try
+        # 1. 读取字符串列表长度
+        list_length = read(fifo_in, Int64)
+        println("Julia: Reading string list of length: $list_length")
+        
+        # 2. 读取每个字符串
+        string_list = String[]
+        for i in 1:list_length
+            # 读取字符串长度
+            str_length = read(fifo_in, Int64)
+            # 读取字符串字节
+            str_bytes = read(fifo_in, str_length)
+            # 转换为字符串
+            str_content = String(str_bytes)
+            push!(string_list, str_content)
+        end
+        
+        return string_list
+        
+    catch e
+        @warn "Error in receive_string_list" exception=(e, catch_backtrace())
+        return String[]
+    end
+end
+
+"""
+尝试读取数据，使用阻塞读取而不是检查bytesavailable
+"""
+function safe_receive_string_list(fifo_in::IO, timeout_seconds::Float64 = 30.0)
+    # 创建一个任务来执行读取操作
+    read_task = @async begin
+        try
+            return receive_string_list(fifo_in)
+        catch e
+            @warn "Error in async read" exception=(e, catch_backtrace())
+            return String[]
+        end
+    end
+    
+    # 等待任务完成或超时
+    result = nothing
+    elapsed = 0.0
+    while elapsed < timeout_seconds
+        if istaskdone(read_task)
+            result = fetch(read_task)
+            break
+        end
+        sleep(0.1)
+        elapsed += 0.1
+    end
+    
+    if result === nothing
+        # 超时了，尝试取消任务
+        println("Julia: Timeout occurred, cancelling read task")
+        return String[]
+    end
+    
+    return result
+end
 
 function communicate_with_python(
     fifo_out::Any,
@@ -621,25 +687,46 @@ function communicate_with_python(
         # 确保所有数据都被发送
         flush(fifo_out)
 
-        # ----- 从 Python 接收计算结果 (非阻塞) -----
-        # 检查是否有数据可读
-        if bytesavailable(fifo_in) >= sizeof(Float64)
-            calculation_result = read(fifo_in, Float64)
+        println("Julia: Data sent to Python, waiting for response...")
+        open("julia_get.log", "a") do f
+            write(f, "Julia: Data sent to Python, waiting for response...\n")
+        end
+
+        # ----- 从 Python 接收字符串列表结果 -----
+        # 使用更健壮的读取方法
+        println("Julia: Attempting to read string list from Python...")
+        expr_list = safe_receive_string_list(fifo_in, 30.0)
+        
+        if !isempty(expr_list)
+            println("Julia: Successfully received $(length(expr_list)) expressions")
+            
+            # 打印接收到的字符串列表
+            println("Received expression list from Python:")
+            for (i, expr) in enumerate(expr_list)
+                println("  [$i]: $expr")
+            end
+            
             open("julia_get.log", "a") do f
-                write(f, "Received calculation result from Python: " * string(calculation_result) * "\n")
+                write(f, "Received expression list from Python:\n")
+                for (i, expr) in enumerate(expr_list)
+                    write(f, "  [$i]: $expr\n")
+                end
+                write(f, "\n")
             end
         else
-            # Python 还没有准备好数据，直接跳过
+            println("Julia: Failed to receive data from Python or received empty list")
             open("julia_get.log", "a") do f
-                write(f, "No data available from Python, skipping...\n")
+                write(f, "Julia: Failed to receive data from Python or received empty list\n")
             end
         end
         
     catch e
         @warn "Communication error in Julia" exception=(e, catch_backtrace())
+        open("julia_get.log", "a") do f
+            write(f, "Communication error in Julia: $e\n")
+        end
     end
 end
-
 # --- 使用示例 ---
 # 在你的主程序中，你需要像这样调用它：
 

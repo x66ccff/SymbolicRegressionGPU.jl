@@ -1,7 +1,3 @@
-#
-# ===== FINAL, ROBUST PYTHON SCRIPT =====
-# Re-introduces the calculation with better stability and logging.
-#
 import os
 import struct
 import sys
@@ -18,8 +14,6 @@ from PSRNmodels import PSRN
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
-# print(operators)
-# operators = eval(operators)
 operators = ['Add','Mul','SemiSub','SemiDiv','Sin','Cos','Exp','Log']
 n_psrn_input = 5
 print(operators)
@@ -30,15 +24,6 @@ sum_time = 0
 variables_name = [f"x_{i}" for i in range(n_psrn_input)]
 target_name = ["y"]
 
-# Input = df.values[:, :-1].reshape(len(df), -1)
-# Output = df.values[:, -1].reshape(len(df), 1)
-
-# Input = torch.from_numpy(Input).to(device).to(torch.float32)
-# Output = torch.from_numpy(Output).to(device).to(torch.float32)
-
-# print(Input.shape, Output.shape)
-# print(Input.dtype, Output.dtype)
-
 n_symbol_layers = 3
 use_constant = False
 psrn = PSRN(
@@ -48,40 +33,6 @@ psrn = PSRN(
             dr_mask=None,
             device=device,
         )
-
-    # start = time.time()
-    # flag, pareto_ls = regressor.fit(
-    #     Input,
-    #     Output,
-    #     n_down_sample=hp["n_down_sample"],
-    #     use_threshold=False,  # Not use threshold when running benchmarks
-    #     threshold=1e-20,
-    #     probe=probe,  # expression probe, string, stop if probe in pf
-    #     prun_const=True,
-    #     prun_ndigit=2,
-    #     top_k=topk,
-    # )
-    # end = time.time()
-    # time_cost = end - start
-
-    # crits = ["reward", "mse"]
-
-    # for crit in crits:
-    #     print("Pareto Front sort by {}".format(crit))
-    #     pareto_ls = regressor.display_expr_table(sort_by=crit)
-
-    # expr_str, reward, loss, complexity = pareto_ls[0]
-    # expr_sympy = sp.simplify(expr_str)
-
-    # print(expr_str)
-
-    # print("time_cost", time_cost)
-    # if flag:
-    #     print("[*** Found Expr ! ***]")
-    #     cnt_success += 1
-    # sum_time += time_cost
-
-    # print(expr_sympy)
 
 JULIA_TO_PYTHON_PIPE = 'julia_to_python_pipe'
 PYTHON_TO_JULIA_PIPE = 'python_to_julia_pipe'
@@ -95,6 +46,11 @@ def read_array_from_pipe(fifo_read):
         num_elements = np.prod(shape) if shape else 0; data_bytes = int(num_elements * 8)
         flat_data = fifo_read.read(data_bytes)
         array = np.frombuffer(flat_data, dtype=np.float64).reshape(shape, order='F')
+        
+        # 修复1: 确保数组是可写的
+        if not array.flags.writeable:
+            array = array.copy()
+        
         return array
     except Exception as e:
         sys.stderr.write(f"CRITICAL ERROR in read_array_from_pipe: {e}\n"); traceback.print_exc(file=sys.stderr)
@@ -103,11 +59,6 @@ def read_array_from_pipe(fifo_read):
 def send_string_list(fifo_write, string_list):
     """
     序列化并发送字符串列表到指定的IO流。
-    协议:
-    1. 写入字符串列表长度 (Int64)
-    2. 对于每个字符串：
-       - 写入字符串长度 (Int64)
-       - 写入字符串的UTF-8字节
     """
     try:
         # 1. 发送字符串列表长度
@@ -133,27 +84,35 @@ def send_string_list(fifo_write, string_list):
         sys.stdout.write(f"Sent string list with {list_length} strings\n")
         sys.stdout.flush()
         
-        # 强制刷新缓冲区
-        fifo_write.flush()
-        os.fsync(fifo_write.fileno())
-        sys.stdout.write("Flushed and synced data to Julia\n")
+        # 修复2: 改进管道刷新机制，添加错误处理
+        try:
+            fifo_write.flush()
+            # 检查文件描述符是否有效
+            fd = fifo_write.fileno()
+            if fd >= 0:
+                os.fsync(fd)
+                sys.stdout.write("Successfully flushed and synced data to Julia\n")
+            else:
+                sys.stdout.write("Warning: Invalid file descriptor, skipping fsync\n")
+        except (OSError, ValueError) as sync_error:
+            sys.stdout.write(f"Warning: Could not sync to disk: {sync_error}. Data may still be sent successfully.\n")
+        
         sys.stdout.flush()
         
     except Exception as e:
         sys.stderr.write(f"Error in send_string_list: {e}\n")
         traceback.print_exc(file=sys.stderr)
+        raise  # 重新抛出异常，让调用者知道发送失败
 
 def robust_gpu_calculation(value, tensor_size=1_000_000, iterations=100):
     """
     一个更健壮的 GPU 密集型任务版本。
-    - tensor_size: 每个随机张量中的元素数。
-    - iterations: 计算循环的次数。
     """
     sys.stdout.write(
         f"Python: Starting robust calculation with trigger={value}, "
         f"tensor_size={tensor_size}, iterations={iterations}\n"
     )
-    # 打印初始显存
+    
     if torch.cuda.is_available():
         sys.stdout.write(f"  Initial VRAM Used: {torch.cuda.memory_allocated() / 1e6:.2f} MB\n")
     sys.stdout.flush()
@@ -162,30 +121,22 @@ def robust_gpu_calculation(value, tensor_size=1_000_000, iterations=100):
     
     for i in range(iterations):
         try:
-            # 创建随机张量并执行操作
             noise = torch.randn(tensor_size, device='cuda', dtype=torch.float64)
-            # 使用加法，而不是原地操作，因为 result 是一个标量，noise是一个向量
-            result += torch.mean(noise) # 使用 mean 更稳定
-            
-            # 清理中间变量
+            result += torch.mean(noise)
             del noise
 
             if (i + 1) % 20 == 0:
-                # 每20次迭代打印一次进度并清理缓存
                 sys.stdout.write(f"  Calculation progress: {i+1}/{iterations}\n")
                 sys.stdout.flush()
-                # 强制PyTorch释放未被引用的缓存，有助于防止显存碎片化
                 torch.cuda.empty_cache()
 
         except torch.cuda.OutOfMemoryError:
             sys.stderr.write(f"FATAL: CUDA Out of Memory during iteration {i+1}. "
                              f"Attempted to allocate for a tensor of size {tensor_size}.\n")
-            # 发生内存溢出时，无法继续，返回一个错误码
             return float('-inf') 
             
     final_result = result.item()
     
-    # 打印最终显存
     if torch.cuda.is_available():
         sys.stdout.write(f"  Final VRAM Used: {torch.cuda.memory_allocated() / 1e6:.2f} MB\n")
     sys.stdout.write(f"Python: Calculation finished. Sending back {final_result}\n")
@@ -210,35 +161,57 @@ def main():
             while True:
                 sys.stdout.write("\nWaiting for new job...\n")
                 sys.stdout.flush()
-                # 1. 接收数据
-                trigger_data = fifo_read.read(8)
-                trigger_value = struct.unpack('d', trigger_data)[0]
-                X_np = read_array_from_pipe(fifo_read)
-                y_np = read_array_from_pipe(fifo_read)
-                if X_np is None or y_np is None: 
-                    break
                 
-                # 2. 记录接收信息
-                sys.stdout.write(f"Received X shape {X_np.shape}, y shape {y_np.shape}\n")
-                X_torch = torch.from_numpy(X_np).to('cuda')
-                y_torch = torch.from_numpy(y_np).to('cuda')
-                sys.stdout.write(f"Successfully converted to CUDA tensors.\n")
-                sys.stdout.flush()
+                try:
+                    # 1. 接收数据
+                    trigger_data = fifo_read.read(8)
+                    if len(trigger_data) != 8:
+                        sys.stdout.write("Received incomplete trigger data, breaking loop\n")
+                        break
+                        
+                    trigger_value = struct.unpack('d', trigger_data)[0]
+                    X_np = read_array_from_pipe(fifo_read)
+                    y_np = read_array_from_pipe(fifo_read)
+                    if X_np is None or y_np is None: 
+                        break
+                    
+                    # 2. 记录接收信息并转换为torch张量
+                    sys.stdout.write(f"Received X shape {X_np.shape}, y shape {y_np.shape}\n")
+                    
+                    # 修复3: 确保NumPy数组可写后再转换为torch张量
+                    if not X_np.flags.writeable:
+                        X_np = X_np.copy()
+                    if not y_np.flags.writeable:
+                        y_np = y_np.copy()
+                    
+                    X_torch = torch.from_numpy(X_np).to('cuda')
+                    y_torch = torch.from_numpy(y_np).to('cuda')
+                    sys.stdout.write(f"Successfully converted to CUDA tensors.\n")
+                    sys.stdout.flush()
 
-                # 3. 执行健壮的计算任务
-                result = robust_gpu_calculation(trigger_value, tensor_size=1_000_000, iterations=100)
-                
-                psrn.current_expr_ls = variables_name
-                n_top = 10
-                expr_best_ls, MSE_min_ls = psrn.get_best_expr_and_MSE_topk(X_torch, y_torch, n_top)
-                sys.stdout.write(f"Received expr_best_ls {expr_best_ls}, MSE_min_ls {MSE_min_ls}\n")
-                
-                # 4. 发送字符串列表结果 (替换原来的 Float64 结果)
-                sys.stdout.write("About to send string list to Julia...\n")
-                sys.stdout.flush()
-                send_string_list(fifo_write, expr_best_ls)
-                sys.stdout.write("Finished sending string list to Julia\n")
-                sys.stdout.flush()
+                    # 3. 执行计算任务
+                    result = robust_gpu_calculation(trigger_value, tensor_size=1_000_000, iterations=100)
+                    
+                    psrn.current_expr_ls = variables_name
+                    n_top = 10
+                    expr_best_ls, MSE_min_ls = psrn.get_best_expr_and_MSE_topk(X_torch, y_torch, n_top)
+                    sys.stdout.write(f"Received expr_best_ls {expr_best_ls}, MSE_min_ls {MSE_min_ls}\n")
+                    
+                    # 4. 发送字符串列表结果
+                    sys.stdout.write("About to send string list to Julia...\n")
+                    sys.stdout.flush()
+                    send_string_list(fifo_write, expr_best_ls)
+                    sys.stdout.write("Finished sending string list to Julia\n")
+                    sys.stdout.flush()
+                    
+                except BrokenPipeError:
+                    sys.stdout.write("Broken pipe detected, Julia process may have terminated\n")
+                    break
+                except Exception as loop_error:
+                    sys.stderr.write(f"Error in processing loop: {loop_error}\n")
+                    traceback.print_exc(file=sys.stderr)
+                    # 继续下一次循环而不是退出
+                    continue
                 
     except Exception as e:
         sys.stderr.write(f"Python script crashed in main loop: {e}\n")

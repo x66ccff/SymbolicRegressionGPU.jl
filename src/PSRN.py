@@ -23,7 +23,7 @@ print(operators)
 cnt_success = 0
 sum_time = 0
 
-variables_name = [f"x_{i}" for i in range(n_psrn_input)]
+variables_name = [f"v_{i}" for i in range(n_psrn_input)]
 target_name = ["y"]
 
 n_symbol_layers = 3

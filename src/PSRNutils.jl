@@ -909,7 +909,7 @@ function parse_primary_with_parser(tokens::Vector{String}, parser::ExpressionPar
         popfirst!(tokens)
         
         return node, tokens
-    elseif startswith(token, "x_")
+    elseif startswith(token, "v_")
         popfirst!(tokens)
         var_index_str = token[3:end]
         var_index = parse(Int, var_index_str)
@@ -998,13 +998,13 @@ function test_conversion(options::AbstractOptions)
     println()
     
     test_exprs = [
-        "(((x_1)-(x_4))*((x_0)/(x_1)))-(((x_1)/(x_1))-(exp(x_0)))",
-        "sin(x_0)",
-        "((x_1)+(x_2))",
-        "exp(((x_0)*(x_1)))",
-        "log(x_3)",
-        "sqrt(x_0)",  # 测试是否支持sqrt
-        "x_0^x_1",    # 测试幂运算
+        "(((v_1)-(v_4))*((v_0)/(v_1)))-(((v_1)/(v_1))-(exp(v_0)))",
+        "sin(v_0)",
+        "((v_1)+(v_2))",
+        "exp(((v_0)*(v_1)))",
+        "log(v_3)",
+        "sqrt(v_0)",  # 测试是否支持sqrt
+        "v_0^v_1",    # 测试幂运算
         "no data"
     ]
     

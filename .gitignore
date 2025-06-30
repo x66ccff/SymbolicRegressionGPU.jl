@@ -1,6 +1,7 @@
 .dataset*.jl
 .hyperparams*.jl
 outputs
+python_result_ready*
 python_stdout.log
 *.log
 *.csv

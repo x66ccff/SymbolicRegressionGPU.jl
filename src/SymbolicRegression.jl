@@ -707,7 +707,6 @@ function safe_receive_string_list(fifo_in::IO, timeout_seconds::Float64 = 30.0)
     
     return result
 end
-
 function communicate_with_python(
     fifo_out::Any,
     fifo_in::Any,
@@ -717,60 +716,37 @@ function communicate_with_python(
     try
         # 首先检查是否有之前的结果可读
         expr_list = check_for_results(fifo_in)
-        
+
         if expr_list !== nothing && !isempty(expr_list)
-            println("Julia: Successfully received $(length(expr_list)) expressions from previous request")
-            
-            # 打印接收到的字符串列表
-            println("Received expression list from Python:")
-            for (i, expr) in enumerate(expr_list)
-                println("  [$i]: $expr")
-            end
+            println("Julia: Successfully received $(length(expr_list)) expressions from Python")
             
             open("julia_get.log", "a") do f
-                write(f, "Received expression list from Python:\n")
-                for (i, expr) in enumerate(expr_list)
+                write(f, "Received $(length(expr_list)) expressions from Python\n")
+                # 只记录前3个表达式
+                for (i, expr) in enumerate(expr_list[1:min(3, length(expr_list))])
                     write(f, "  [$i]: $expr\n")
                 end
                 write(f, "\n")
             end
         else
-            # 没有可读取的数据
             open("julia_get.log", "a") do f
                 write(f, "no data\n")
             end
         end
         
-        # ----- 发送新的数据到 Python -----
-
-        # !!! 这是关键的补充部分 !!!
-        # Python 正在等待一个触发值，所以我们必须发送一个。
+        # 发送新的数据到 Python（Python会自动丢弃积压的旧数据）
         trigger_value = rand(Float64)
         write(fifo_out, trigger_value)
-        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-        # 发送矩阵 X (这部分不变)
         send_array(fifo_out, X_mapped_sampled)
-
-        # 发送向量 y (这部分不变)
         send_array(fifo_out, y_sampled)
         
-        # 确保所有数据都被发送
-        flush(fifo_out)
-
-        # 增加待处理请求计数
+        # 不执行flush，避免阻塞
+        
         ASYNC_STATE.pending_requests += 1
-
-        println("Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), continuing without waiting...")
-        open("julia_get.log", "a") do f
-            write(f, "Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), continuing without waiting...\n")
-        end
+        println("Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), Python will process latest data only")
         
     catch e
         @warn "Communication error in Julia" exception=(e, catch_backtrace())
-        open("julia_get.log", "a") do f
-            write(f, "Communication error in Julia: $e\n")
-        end
     end
 end
 # --- 使用示例 ---
@@ -1197,14 +1173,15 @@ function _main_search_loop!(
             # @show
 
 
-
+            @info "in👉 communicate_with_python"
             communicate_with_python(
                 state.fifo_out,
                 state.fifo_in,
                 X_mapped_sampled,
                 y_sampled
             ) ######################################################## kk TODO
-
+            @info "out👈 communicate_with_python"
+            
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)
             end

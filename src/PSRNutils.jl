@@ -1046,37 +1046,6 @@ function test_conversion(options::AbstractOptions)
     end
 end
 
-"""
-使用示例 - 支持更多运算符
-"""
-function example_usage()
-    # 测试基本运算符
-    options1 = Options(
-        binary_operators=[+, -, *, /],
-        unary_operators=[sin, cos, exp, log],
-        maxsize=30
-    )
-    
-    println("=== Testing basic operators ===")
-    test_conversion(options1)
-    
-    # 测试扩展运算符（如果支持的话）
-    try
-        options2 = Options(
-            binary_operators=[+, -, *, /, ^],
-            unary_operators=[sin, cos, exp, log, sqrt, abs, tanh],
-            maxsize=30
-        )
-        
-        println("\n=== Testing extended operators ===")
-        test_conversion(options2)
-    catch e
-        println("Extended operators not available: $e")
-    end
-end
-
-# 运行示例
-# example_usage()
 
 """
     _recursive_replace(node::Node, base_expressions::Vector{Node})

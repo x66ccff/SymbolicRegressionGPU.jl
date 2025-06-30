@@ -574,7 +574,16 @@ end
     
     fifo_out = open("julia_to_python_pipe", "w")
     fifo_in = open("python_to_julia_pipe", "r")
-
+    # 清理信号文件
+    signal_files = filter(x -> startswith(x, "python_result_ready_"), readdir("."))
+    for file in signal_files
+        try
+            rm(file)
+            @info "Cleaned up signal file: $file"
+        catch e
+            @warn "Failed to remove signal file $file: $e"
+        end
+    end
     try
         _validate_options(datasets, ropt, options)
         state = _create_workers(datasets, ropt, options)
@@ -971,7 +980,7 @@ function _main_search_loop!(
 
 
             @info "in👉 communicate_with_python"
-            communicate_with_python(
+            nodes_from_python = communicate_with_python(
                 state.fifo_out,
                 state.fifo_in,
                 X_mapped_sampled,
@@ -979,6 +988,7 @@ function _main_search_loop!(
                 options
             ) ######################################################## kk TODO
             
+            @show nodes_from_python
             # @show nodes_from_python
             @info "out👈 communicate_with_python"
             

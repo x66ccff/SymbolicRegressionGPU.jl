@@ -512,6 +512,7 @@ function communicate_with_python(
     y_sampled::Vector{<:AbstractFloat},
     options::AbstractOptions,
 )
+    nodes_from_python = []
     try
         # 首先检查是否有之前的结果可读
         expr_list = check_for_results(fifo_in)
@@ -523,7 +524,10 @@ function communicate_with_python(
                 write(f, "Received $(length(expr_list)) expressions from Python\n")
                 # 只记录前3个表达式
                 for (i, expr) in enumerate(expr_list)
-                    write(f, "  [$i]: $expr\n")
+                    write(f, "      [$i]: $expr\n")
+                    node = convert_python_tree_to_nodes(expr, options)
+                    push!(nodes_from_python, node)
+                    write(f, " node [$i]: $node\n")
                 end
                 write(f, "\n")
             end
@@ -547,6 +551,8 @@ function communicate_with_python(
     catch e
         @warn "Communication error in Julia" exception=(e, catch_backtrace())
     end
+
+    return nodes_from_python
 end
 
 

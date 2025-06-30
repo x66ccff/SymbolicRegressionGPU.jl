@@ -975,8 +975,11 @@ function _main_search_loop!(
                 state.fifo_out,
                 state.fifo_in,
                 X_mapped_sampled,
-                y_sampled
+                y_sampled,
+                options
             ) ######################################################## kk TODO
+            
+            # @show nodes_from_python
             @info "out👈 communicate_with_python"
             
             if options.save_to_file

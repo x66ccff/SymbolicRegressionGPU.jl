@@ -1,5 +1,5 @@
 using SymbolicRegression
-
+# clear && julia -t 16 example.jl --project=.
 
 # before: 2e+02 3e+02
 # after: 6e+03 5e+03

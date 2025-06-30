@@ -11,7 +11,7 @@ y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
 options = SymbolicRegression.Options(;
     binary_operators=[+, *, /, -],
      unary_operators=[cos, exp, sin, log],
-    timeout_in_seconds=30
+    timeout_in_seconds=360
 )
 
 hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)

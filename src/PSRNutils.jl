@@ -357,3 +357,191 @@ function psrn_preprocess(
     return X_mapped_sampled, y_sampled, current_expr_ls
     # return best_expressions
 end
+
+
+# 全局变量来跟踪异步状态
+mutable struct AsyncState
+    pending_requests::Int64
+    last_signal_check::Int64
+end
+
+# 全局状态实例
+const ASYNC_STATE = AsyncState(0, 0)
+
+"""
+序列化并发送一个数组到指定的IO流。
+协议:
+1. 写入维度数 (Int64)
+2. 依次写入每个维度的大小 (Int64)
+3. 写入整个数组的原始数据
+"""
+function send_array(fifo_out::IO, arr::AbstractArray{<:AbstractFloat})
+    # 确保数据类型是 Float64，与 Python 端匹配
+    arr_f64 = convert(Array{Float64}, arr)
+
+    # 1. 发送维度数量
+    num_dims = Int64(ndims(arr_f64))
+    write(fifo_out, num_dims)
+
+    # 2. 发送每个维度的大小
+    dims = Int64.(size(arr_f64))
+    
+    # ---- 这是修正的部分 ----
+    # 错误行：write(fifo_out, dims) -> 不能直接写入元组
+    # 修正：遍历元组，将每个维度的大小单独写入
+    for d in dims
+        write(fifo_out, d)
+    end
+    # -------------------------
+
+    # 3. 发送扁平化的数组数据
+    # Julia 的 write 函数可以直接处理数组，它会按列主序（column-major）写入
+    write(fifo_out, arr_f64)
+end
+
+"""
+从指定的IO流接收并反序列化字符串列表。
+协议:
+1. 读取字符串列表长度 (Int64)
+2. 对于每个字符串：
+   - 读取字符串长度 (Int64)
+   - 读取字符串的UTF-8字节并转换为字符串
+"""
+function receive_string_list(fifo_in::IO)
+    try
+        # 1. 读取字符串列表长度
+        list_length = read(fifo_in, Int64)
+        println("Julia: Reading string list of length: $list_length")
+        
+        # 2. 读取每个字符串
+        string_list = String[]
+        for i in 1:list_length
+            # 读取字符串长度
+            str_length = read(fifo_in, Int64)
+            # 读取字符串字节
+            str_bytes = read(fifo_in, str_length)
+            # 转换为字符串
+            str_content = String(str_bytes)
+            push!(string_list, str_content)
+        end
+        
+        return string_list
+        
+    catch e
+        @warn "Error in receive_string_list" exception=(e, catch_backtrace())
+        return String[]
+    end
+end
+
+"""
+检查是否有新的结果可读
+"""
+function check_for_results(fifo_in::IO)
+    signal_files = filter(x -> startswith(x, "python_result_ready_"), readdir("."))
+    
+    if isempty(signal_files)
+        return nothing
+    end
+    
+    # 按文件名排序，处理最早的信号
+    sort!(signal_files)
+    oldest_signal = signal_files[1]
+    
+    try
+        # 读取结果
+        println("Julia: Found signal file $oldest_signal, reading result...")
+        expr_list = receive_string_list(fifo_in)
+        
+        # 删除信号文件
+        rm(oldest_signal)
+        ASYNC_STATE.pending_requests = max(0, ASYNC_STATE.pending_requests - 1)
+        
+        return expr_list
+        
+    catch e
+        @warn "Error reading result after signal" exception=(e, catch_backtrace())
+        # 即使读取失败也要删除信号文件，避免死循环
+        try
+            rm(oldest_signal)
+        catch
+        end
+        return String[]
+    end
+end
+
+"""
+尝试读取数据，使用阻塞读取而不是检查bytesavailable
+"""
+function safe_receive_string_list(fifo_in::IO, timeout_seconds::Float64 = 30.0)
+    # 创建一个任务来执行读取操作
+    read_task = @async begin
+        try
+            return receive_string_list(fifo_in)
+        catch e
+            @warn "Error in async read" exception=(e, catch_backtrace())
+            return String[]
+        end
+    end
+    
+    # 等待任务完成或超时
+    result = nothing
+    elapsed = 0.0
+    while elapsed < timeout_seconds
+        if istaskdone(read_task)
+            result = fetch(read_task)
+            break
+        end
+        sleep(0.1)
+        elapsed += 0.1
+    end
+    
+    if result === nothing
+        # 超时了，尝试取消任务
+        println("Julia: Timeout occurred, cancelling read task")
+        return String[]
+    end
+    
+    return result
+end
+function communicate_with_python(
+    fifo_out::Any,
+    fifo_in::Any,
+    X_mapped_sampled::Matrix{<:AbstractFloat},
+    y_sampled::Vector{<:AbstractFloat}
+)
+    try
+        # 首先检查是否有之前的结果可读
+        expr_list = check_for_results(fifo_in)
+
+        if expr_list !== nothing && !isempty(expr_list)
+            println("Julia: Successfully received $(length(expr_list)) expressions from Python")
+            
+            open("julia_get.log", "a") do f
+                write(f, "Received $(length(expr_list)) expressions from Python\n")
+                # 只记录前3个表达式
+                for (i, expr) in enumerate(expr_list[1:min(3, length(expr_list))])
+                    write(f, "  [$i]: $expr\n")
+                end
+                write(f, "\n")
+            end
+        else
+            open("julia_get.log", "a") do f
+                write(f, "no data\n")
+            end
+        end
+        
+        # 发送新的数据到 Python（Python会自动丢弃积压的旧数据）
+        trigger_value = rand(Float64)
+        write(fifo_out, trigger_value)
+        send_array(fifo_out, X_mapped_sampled)
+        send_array(fifo_out, y_sampled)
+        
+        # 不执行flush，避免阻塞
+        
+        ASYNC_STATE.pending_requests += 1
+        println("Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), Python will process latest data only")
+        
+    catch e
+        @warn "Communication error in Julia" exception=(e, catch_backtrace())
+    end
+end

@@ -975,7 +975,7 @@ function _main_search_loop!(
                             n_variables,
                             max_samples
                         )
-            @show X_mapped_sampled, y_sampled
+            # @show X_mapped_sampled, y_sampled
             # @show
 
 
@@ -986,7 +986,38 @@ function _main_search_loop!(
                 X_mapped_sampled,
                 y_sampled,
                 options
-            ) ######################################################## kk TODO
+            ) 
+            
+            
+            # NEW, CORRECTED LINE
+            base_nodes_for_replacement = Node[expr.tree for expr in current_expr_ls]
+            # Now, call the function with the correctly typed arguments.
+            # nodes_from_python should already be a Vector{Node} from your parser.
+            # base_nodes_for_replacement is now also a Vector{Node}.
+            nodes_from_python_replaced = replace_base_expressions(
+                nodes_from_python,
+                base_nodes_for_replacement
+            )
+            
+            # =================================================================
+            # Now `nodes_from_python_replaced` contains the final, combined trees
+            # You can now use them, for example, by converting them back to Expressions
+            # to add to your population.
+            # =================================================================
+            
+            final_expressions = [
+                Expression(
+                    node;
+                    operators=options.operators,
+                    variable_names=dataset.variable_names
+                )
+                for node in nodes_from_python_replaced
+            ]
+            
+            @show final_expressions
+            
+            
+            ######################################################## kk TODO
             
             @show nodes_from_python
             # @show nodes_from_python

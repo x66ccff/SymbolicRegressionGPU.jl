@@ -512,9 +512,11 @@ function communicate_with_python(
     y_sampled::Vector{<:AbstractFloat},
     options::AbstractOptions,
 )
-    nodes_from_python = []
+    # FIX 1: Initialize a typed vector of Nodes, not a Vector{Any}
+    nodes_from_python = Node[]
+
     try
-        # 首先检查是否有之前的结果可读
+        # First, check for any results that might be ready
         expr_list = check_for_results(fifo_in)
 
         if expr_list !== nothing && !isempty(expr_list)
@@ -522,12 +524,18 @@ function communicate_with_python(
             
             open("julia_get.log", "a") do f
                 write(f, "Received $(length(expr_list)) expressions from Python\n")
-                # 只记录前3个表达式
                 for (i, expr) in enumerate(expr_list)
                     write(f, "      [$i]: $expr\n")
                     node = convert_python_tree_to_nodes(expr, options)
-                    push!(nodes_from_python, node)
-                    write(f, " node [$i]: $node\n")
+
+                    # FIX 2: Only push valid Nodes into the typed vector.
+                    # This prevents `nothing` from ever being an element.
+                    if !isnothing(node)
+                        push!(nodes_from_python, node)
+                        write(f, " node [$i]: $node\n")
+                    else
+                        write(f, " node [$i]: (failed to parse)\n")
+                    end
                 end
                 write(f, "\n")
             end
@@ -537,13 +545,11 @@ function communicate_with_python(
             end
         end
         
-        # 发送新的数据到 Python（Python会自动丢弃积压的旧数据）
+        # Send new data to Python
         trigger_value = rand(Float64)
         write(fifo_out, trigger_value)
         send_array(fifo_out, X_mapped_sampled)
         send_array(fifo_out, y_sampled)
-        
-        # 不执行flush，避免阻塞
         
         ASYNC_STATE.pending_requests += 1
         println("Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), Python will process latest data only")
@@ -552,6 +558,7 @@ function communicate_with_python(
         @warn "Communication error in Julia" exception=(e, catch_backtrace())
     end
 
+    # This function now correctly returns a `Vector{Node}`
     return nodes_from_python
 end
 
@@ -1070,3 +1077,86 @@ end
 
 # 运行示例
 # example_usage()
+
+"""
+    _recursive_replace(node::Node, base_expressions::Vector{Node})
+
+Recursively traverses a node tree. If a variable node (a leaf representing v_i)
+is found, it's replaced with the corresponding tree from `base_expressions`.
+Otherwise, it rebuilds the tree with the results of the recursive calls on its children.
+"""
+function _recursive_replace(node::Node, base_expressions::Vector{Node})
+    # Base Case 1: If the node is a constant, return it as is.
+    if node.constant
+        return node
+    end
+
+    # Base Case 2: If the node is a variable (from Python, e.g., v_i),
+    # this is where the replacement happens.
+    # Your parser correctly converts v_i to feature=(i+1).
+    if node.degree == 0 && !node.constant
+        feature_index = node.feature
+
+        # Check if the index is valid for our base expressions list.
+        if 1 <= feature_index <= length(base_expressions)
+            # Replace this variable leaf with the entire corresponding tree.
+            # We return a copy to avoid aliasing issues if the same base
+            # expression is used multiple times.
+            return copy_node(base_expressions[feature_index])
+        else
+            # This case should ideally not happen if Python and Julia are in sync.
+            # It means Python asked for a variable v_i for which we have no base expression.
+            @warn "Feature index $feature_index from Python is out of bounds for the base expression list (size $(length(base_expressions))). The original variable node will be kept."
+            return node
+        end
+    end
+
+    # Recursive Step: If the node is an operator, process its children.
+    if node.degree == 1
+        # Unary operator
+        new_l = _recursive_replace(node.l, base_expressions)
+        return Node(node.op, new_l)
+    elseif node.degree == 2
+        # Binary operator
+        new_l = _recursive_replace(node.l, base_expressions)
+        new_r = _recursive_replace(node.r, base_expressions)
+        return Node(node.op, new_l, new_r)
+    else
+        # Should not happen for standard operators.
+        @warn "Encountered a node with unsupported degree: $(node.degree). Returning as is."
+        return node
+    end
+end
+
+"""
+    replace_base_expressions(nodes_from_python, current_expr_node_ls)
+
+Takes a list of high-level expression trees from Python (where variables
+like `v_0`, `v_1` are placeholders) and a list of base expression trees
+from Julia. It substitutes each `v_i` placeholder with the i-th base
+expression tree.
+
+# Arguments
+- `nodes_from_python::Vector{Node}`: A vector of `Node` objects parsed from Python's output.
+  A variable `v_i` in Python's string is expected to be parsed as a `Node` with `feature = i + 1`.
+- `current_expr_node_ls::Vector{Node}`: A vector of `Node` objects representing the
+  basis functions (e.g., `x1+x2`, `sin(x3)`, etc.) that should be substituted in.
+
+# Returns
+- `Vector{Node}`: A new vector of `Node` objects representing the final, fully-formed
+  expressions.
+"""
+function replace_base_expressions(
+    nodes_from_python::Vector{Node},
+    current_expr_node_ls::Vector{Node}
+)
+    nodes_from_python_replaced = Node[]
+
+    for python_node in nodes_from_python
+        # For each high-level tree, perform the recursive replacement
+        replaced_node = _recursive_replace(python_node, current_expr_node_ls)
+        push!(nodes_from_python_replaced, replaced_node)
+    end
+
+    return nodes_from_python_replaced
+end

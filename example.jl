@@ -8,12 +8,12 @@ using SymbolicRegression
 
 # X = randn(Float32, 5, 10000) # speed: ~2e+03 for default ~1e+04 for -t 16
 X = randn(Float32, 5, 100) # speed: ~1e+05 for default ~4e+05 for -t 16
-y = 2 * cos.(X[4, :]) + X[1, :] .^ 2 .- 2
+y = 2 * cos.(X[4, :]) .^ 3 + X[1, :] .^ 2 .- 2 # harder problem
 
 options = SymbolicRegression.Options(;
     binary_operators=[+, *, /, -],
      unary_operators=[cos, exp, sin, log],
-    timeout_in_seconds=60
+    timeout_in_seconds=30
 )
 
 hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)

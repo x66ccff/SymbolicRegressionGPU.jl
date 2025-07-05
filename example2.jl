@@ -2,6 +2,7 @@
 # export JULIA_DEBUG=loading
 # julia --project=. example.jl
 # julia example.jl
+# clear && julia -t 16 example.jl --project=.
 
 using SymbolicRegression
 using LoopVectorization
@@ -22,7 +23,7 @@ function main()
     # y = y[indices]     # 获取对应的标签
 
     options = SymbolicRegression.Options(;
-        timeout_in_seconds=60000000,
+        timeout_in_seconds=60,
         binary_operators=[+, *, /, -],
         unary_operators=[sin, cos, exp, log, sqrt],
         # population_size=100,

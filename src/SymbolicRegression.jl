@@ -946,10 +946,20 @@ function process_psrn_results!(
         #    例如，将 Node{Float64} 树转换为 Node{Float32} 树。
         converted_tree = convert(Node{T}, psrn_expr.tree)
 
+        # newSize = compute_complexity(converted_tree, options)
+        member = PopMember(dataset, converted_tree, options; deterministic=false)
+        cost, loss = eval_cost(dataset, member, options)
+        member.cost = cost
+        member.loss = loss
         # 2. 直接用转换后的树来创建 PopMember。
         #    构造函数 PopMember(::Dataset{T, ...}, ::Node{T, ...}, ::Options, ...) 是存在的。
         #    这样就保证了类型匹配。
-        member = PopMember(dataset, converted_tree, options; deterministic=false)
+        @info "cost $cost"
+        @info "loss $loss"
+        # @info "new member: $(member)"
+        @info "new member:"
+        @info string_tree(member.tree, options)
+        
 
         update_hall_of_fame!(hall_of_fame, [member], options)
     end
@@ -1142,13 +1152,16 @@ function _main_search_loop!(
                 # @show history_expr_ls
                 # @info "final_expressions 🔥🔥🔥🔥🔥🔥"
                 # for expr in final_expressions
-                #     @info expr
+                #     # @info expr
+                #     expr_str = string_tree(expr, nothing)
+                #     @info expr_str
+
                 # end
 
 
-                process_psrn_results!(
-                    final_expressions, state.halls_of_fame[j], dataset, options
-                )
+                # process_psrn_results!(
+                #     final_expressions, state.halls_of_fame[j], dataset, options
+                # )
                 # @info "out👈 communicate_with_python"
 
             end

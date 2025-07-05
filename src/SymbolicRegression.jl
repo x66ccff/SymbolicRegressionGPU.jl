@@ -880,6 +880,8 @@ function _main_search_loop!(
         nothing
     end
 
+    global_index = 0
+
     last_print_time = time()
     last_speed_recording_time = time()
     num_evals_last = sum(sum, state.num_evals)
@@ -956,6 +958,9 @@ function _main_search_loop!(
             #! format: off
             update_hall_of_fame!(state.halls_of_fame[j], cur_pop.members, options)
             update_hall_of_fame!(state.halls_of_fame[j], best_seen.members[best_seen.exists], options)
+
+            # @info "typeof cur_pop.members $(typeof(cur_pop.members))"
+            # typeof cur_pop.members Vector{PopMember{Float32, Float32, Expression{Float32, Node{Float32, 2}, @NamedTuple{operators::Nothing, variable_names::Nothing}}}}
             #! format: on
 
             # Dominating pareto curve - must be better than all simpler equations
@@ -963,7 +968,8 @@ function _main_search_loop!(
 
             ##################################################################################################################
 
-            N_PSRN_INPUT = 5
+            # N_PSRN_INPUT = 5
+            N_PSRN_INPUT = 4
             n_variables = 3
             n_top = 10
             max_samples = 20
@@ -978,51 +984,103 @@ function _main_search_loop!(
             # @show X_mapped_sampled, y_sampled
             # @show
 
+            push!(history_subtrees_list, current_expr_ls)
+            # @info "pushing current_expr_ls into 🔥 history_subtrees_list"
+            @show current_expr_ls
 
             @info "in👉 communicate_with_python"
-            nodes_from_python = communicate_with_python(
+            nodes_from_python, received_index = communicate_with_python(
                 state.fifo_out,
                 state.fifo_in,
                 X_mapped_sampled,
                 y_sampled,
-                options
+                options,
+                global_index
             ) 
+
+            global_index += 1
             
-            
-            # NEW, CORRECTED LINE
-            base_nodes_for_replacement = Node[expr.tree for expr in current_expr_ls]
-            # Now, call the function with the correctly typed arguments.
-            # nodes_from_python should already be a Vector{Node} from your parser.
-            # base_nodes_for_replacement is now also a Vector{Node}.
-            nodes_from_python_replaced = replace_base_expressions(
-                nodes_from_python,
-                base_nodes_for_replacement
-            )
-            
-            # =================================================================
-            # Now `nodes_from_python_replaced` contains the final, combined trees
-            # You can now use them, for example, by converting them back to Expressions
-            # to add to your population.
-            # =================================================================
-            
-            final_expressions = [
-                Expression(
-                    node;
-                    operators=options.operators,
-                    variable_names=dataset.variable_names
+            if received_index != nothing
+                @info "✨received_index $(received_index)"
+                history_expr_ls = history_subtrees_list[received_index+1]
+                # NEW, CORRECTED LINE
+                # base_nodes_for_replacement = Node[expr.tree for expr in history_expr_ls]
+
+
+                # history_expr_ls # type : Vector{Expressions}
+                # base_nodes_for_replacement = history_expr_ls
+
+                base_nodes_for_replacement = [expr.tree for expr in history_expr_ls]
+                
+
+
+                # base_nodes_for_replacement = history_expr_ls.tree
+                # Now, call the function with the correctly typed arguments.
+                # nodes_from_python should already be a Vector{Node} from your parser.
+                # base_nodes_for_replacement is now also a Vector{Node}.
+                nodes_from_python_replaced = replace_base_expressions(
+                    nodes_from_python,
+                    base_nodes_for_replacement
                 )
-                for node in nodes_from_python_replaced
-            ]
             
-            @show final_expressions
-            
-            
-            ######################################################## kk TODO
-            
-            @show nodes_from_python
-            # @show nodes_from_python
-            @info "out👈 communicate_with_python"
-            
+                final_expressions = [
+                    Expression(
+                        node;
+                        # operators=options.operators,
+                        operators=nothing,
+                        # variable_names=dataset.variable_names
+                        variable_names=nothing
+                    )
+                    for node in nodes_from_python_replaced
+                ]
+                @info "nodes_from_python✅"
+                # @show nodes_from_python
+                for expr in nodes_from_python
+                    # @info typeof(expr) # Node{Float32, 2}
+                    expr_string = string_tree(expr, nothing)
+                    @info expr_string
+                end
+
+                @info "nodes_from_python_replaced✅"
+                # @show nodes_from_python_replaced  
+
+                for expr in nodes_from_python_replaced
+                    # @info typeof(expr) # Node{Float32, 2}
+                    expr_string = string_tree(expr, nothing)
+                    @info expr_string
+                end
+
+                
+                @info "history_expr_ls✅"
+                @show history_expr_ls
+
+                # @info "base_nodes_for_replacement🧪🧪🧪"
+                # @show base_nodes_for_replacement
+                @info "final_expressions 🔥🔥🔥🔥🔥🔥"
+                # @info "typeof final_expressions: $(typeof(final_expressions))"
+
+
+                # Vector{Expression{Float32, Node{Float32, 2},
+                # @NamedTuple{operators::OperatorEnum{Tuple{Tuple{typeof(cos), 
+                # typeof(exp), typeof(sin), typeof(safe_log)},
+                #  Tuple{typeof(+), typeof(*), typeof(/), typeof(-)}}}, variable_names::Vector{String}}}}
+
+
+                # @show final_expressions
+                for expr in final_expressions
+                    # @info typeof(expr) # Expression{Float32, Node{Float32, 2}, @NamedTuple{operators::Nothing, variable_names::Nothing}}
+                    expr_string = string_tree(expr, nothing)
+                    @info expr_string
+                end
+
+                @info "out👈 communicate_with_python"
+
+            else
+                @info "✨🚫 no received_index"
+                
+
+            end
+                
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)
             end

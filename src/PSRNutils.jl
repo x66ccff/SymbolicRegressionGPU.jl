@@ -442,7 +442,7 @@ function check_for_results(fifo_in::IO)
     signal_files = filter(x -> startswith(x, "python_result_ready_"), readdir("."))
     
     if isempty(signal_files)
-        return nothing
+        return nothing, nothing
     end
     
     # 按文件名排序，处理最早的信号
@@ -450,15 +450,18 @@ function check_for_results(fifo_in::IO)
     oldest_signal = signal_files[1]
     
     try
+        # 从文件名中解析索引，这个索引现在就是我们发送的 global_index
+        signal_index = tryparse(Int, replace(oldest_signal, "python_result_ready_" => ""))
+        
         # 读取结果
-        println("Julia: Found signal file $oldest_signal, reading result...")
+        println("Julia: Found signal file $oldest_signal (for index $signal_index), reading result...")
         expr_list = receive_string_list(fifo_in)
         
         # 删除信号文件
         rm(oldest_signal)
         ASYNC_STATE.pending_requests = max(0, ASYNC_STATE.pending_requests - 1)
         
-        return expr_list
+        return expr_list, signal_index
         
     catch e
         @warn "Error reading result after signal" exception=(e, catch_backtrace())
@@ -467,7 +470,7 @@ function check_for_results(fifo_in::IO)
             rm(oldest_signal)
         catch
         end
-        return String[]
+        return String[], nothing
     end
 end
 
@@ -505,25 +508,27 @@ function safe_receive_string_list(fifo_in::IO, timeout_seconds::Float64 = 30.0)
     
     return result
 end
+
 function communicate_with_python(
     fifo_out::Any,
     fifo_in::Any,
     X_mapped_sampled::Matrix{<:AbstractFloat},
     y_sampled::Vector{<:AbstractFloat},
     options::AbstractOptions,
+    global_index::Int64
 )
     # FIX 1: Initialize a typed vector of Nodes, not a Vector{Any}
     nodes_from_python = Node[]
 
     try
         # First, check for any results that might be ready
-        expr_list = check_for_results(fifo_in)
+        expr_list, received_index = check_for_results(fifo_in)
 
         if expr_list !== nothing && !isempty(expr_list)
-            println("Julia: Successfully received $(length(expr_list)) expressions from Python")
+            println("🔍Julia: Successfully received $(length(expr_list)) expressions from Python for index #$received_index")
             
             open("julia_get.log", "a") do f
-                write(f, "Received $(length(expr_list)) expressions from Python\n")
+                write(f, "🔍Received $(length(expr_list)) expressions from Python for index #$received_index\n")
                 for (i, expr) in enumerate(expr_list)
                     write(f, "      [$i]: $expr\n")
                     node = convert_python_tree_to_nodes(expr, options)
@@ -532,39 +537,46 @@ function communicate_with_python(
                     # This prevents `nothing` from ever being an element.
                     if !isnothing(node)
                         push!(nodes_from_python, node)
-                        write(f, " node [$i]: $node\n")
+                        write(f, " 🔍node [$i]: $node\n")
                     else
-                        write(f, " node [$i]: (failed to parse)\n")
+                        write(f, " 🔍node [$i]: (failed to parse)\n")
                     end
                 end
                 write(f, "\n")
             end
         else
             open("julia_get.log", "a") do f
-                write(f, "no data\n")
+                write(f, "🔍no data\n")
             end
         end
         
-        # Send new data to Python
-        trigger_value = rand(Float64)
-        write(fifo_out, trigger_value)
+        # ---- MODIFIED PART ----
+        # Send new data to Python with the new protocol.
+        # Protocol: global_index (Int64) -> X_array -> y_array
+        
+        # 1. Send the global_index
+        write(fifo_out, global_index)
+        
+        # 2. Send the X array
         send_array(fifo_out, X_mapped_sampled)
+        
+        # 3. Send the y vector
         send_array(fifo_out, y_sampled)
+
+        # Ensure data is sent immediately
+        flush(fifo_out)
+        # ---- END MODIFIED PART ----
         
         ASYNC_STATE.pending_requests += 1
-        println("Julia: Data sent to Python (#$(ASYNC_STATE.pending_requests)), Python will process latest data only")
-        
+        println("🔍Julia: Data with index #$global_index sent to Python. Pending requests: $(ASYNC_STATE.pending_requests)")
+            # This function now correctly returns a `Vector{Node}`
+        return nodes_from_python, received_index
     catch e
-        @warn "Communication error in Julia" exception=(e, catch_backtrace())
+        @warn "🔍Communication error in Julia" exception=(e, catch_backtrace())
     end
 
-    # This function now correctly returns a `Vector{Node}`
-    return nodes_from_python
+    return nothing, nothing
 end
-
-
-
-
 """
 通用的表达式解析器 - 支持SR.jl的所有运算符
 """
@@ -1054,7 +1066,7 @@ Recursively traverses a node tree. If a variable node (a leaf representing v_i)
 is found, it's replaced with the corresponding tree from `base_expressions`.
 Otherwise, it rebuilds the tree with the results of the recursive calls on its children.
 """
-function _recursive_replace(node::Node, base_expressions::Vector{Node})
+function _recursive_replace(node::Any, base_expressions::Any)
     # Base Case 1: If the node is a constant, return it as is.
     if node.constant
         return node
@@ -1116,8 +1128,8 @@ expression tree.
   expressions.
 """
 function replace_base_expressions(
-    nodes_from_python::Vector{Node},
-    current_expr_node_ls::Vector{Node}
+    nodes_from_python::Any,
+    current_expr_node_ls::Any
 )
     nodes_from_python_replaced = Node[]
 
@@ -1129,3 +1141,6 @@ function replace_base_expressions(
 
     return nodes_from_python_replaced
 end
+
+
+history_subtrees_list = []

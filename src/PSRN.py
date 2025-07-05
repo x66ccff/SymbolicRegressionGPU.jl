@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import time
 import gc
+import select # Added for check_pipe_data_available
 
 gpu_index = 0 
 os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
@@ -17,7 +18,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
 operators = ['Add','Mul','SemiSub','SemiDiv','Sin','Cos','Exp','Log']
-n_psrn_input = 5
+# n_psrn_input = 5
+n_psrn_input = 4
 print(operators)
 
 cnt_success = 0
@@ -77,6 +79,7 @@ def read_latest_data_only(fifo_read):
     """
     读取管道中的所有数据，但只返回最新的一组
     这样可以确保总是处理最新的数据，丢弃积压的旧数据
+    MODIFIED: Protocol is now index (Int64) -> X_array -> y_array
     """
     datasets = []  # 存储所有读取到的数据组
     
@@ -84,43 +87,39 @@ def read_latest_data_only(fifo_read):
     sys.stdout.flush()
     
     # 持续读取直到管道为空
-    while True:
-        # 检查是否还有数据
-        if not check_pipe_data_available(fifo_read):
-            break
-            
+    while check_pipe_data_available(fifo_read):
         try:
-            # 读取一组完整的数据：trigger + X + y
+            # 读取一组完整的数据：global_index + X + y
             sys.stdout.write("Python: Reading one data set from pipe...\n")
             sys.stdout.flush()
             
-            # 1. 读取触发值
-            trigger_data = fifo_read.read(8)
-            if len(trigger_data) != 8:
-                sys.stdout.write("Python: Incomplete trigger data, stopping read\n")
+            # 1. 读取 global_index
+            index_data = fifo_read.read(8)
+            if len(index_data) != 8:
+                sys.stdout.write("Python: Incomplete index data, stopping read.\n")
                 break
-            trigger_value = struct.unpack('d', trigger_data)[0]
+            global_index = struct.unpack('q', index_data)[0]
             
             # 2. 读取X矩阵
             X_np = read_array_from_pipe(fifo_read)
             if X_np is None:
-                sys.stdout.write("Python: Failed to read X matrix, stopping read\n")
+                sys.stdout.write("Python: Failed to read X matrix, stopping read.\n")
                 break
                 
             # 3. 读取y向量
             y_np = read_array_from_pipe(fifo_read)
             if y_np is None:
-                sys.stdout.write("Python: Failed to read y vector, stopping read\n")
+                sys.stdout.write("Python: Failed to read y vector, stopping read.\n")
                 break
             
             # 存储这组数据
             datasets.append({
-                'trigger': trigger_value,
+                'index': global_index, # <-- Storing the index
                 'X': X_np,
                 'y': y_np
             })
             
-            sys.stdout.write(f"Python: Successfully read dataset #{len(datasets)} (X: {X_np.shape}, y: {y_np.shape})\n")
+            sys.stdout.write(f"Python: Successfully read dataset with index #{global_index} (X: {X_np.shape}, y: {y_np.shape})\n")
             sys.stdout.flush()
             
         except Exception as e:
@@ -129,25 +128,26 @@ def read_latest_data_only(fifo_read):
             break
     
     if len(datasets) == 0:
-        sys.stdout.write("Python: No data available in pipe\n")
+        sys.stdout.write("Python: No complete data available in pipe.\n")
         sys.stdout.flush()
         return None
     elif len(datasets) == 1:
-        sys.stdout.write("Python: Found 1 dataset, processing it\n")
+        latest_data = datasets[0]
+        sys.stdout.write(f"Python: Found 1 dataset, processing it (index #{latest_data['index']}).\n")
         sys.stdout.flush()
-        return datasets[0]
+        return latest_data
     else:
         # 有多组数据，只返回最新的，丢弃旧的
         latest_data = datasets[-1]
-        sys.stdout.write(f"Python: Found {len(datasets)} datasets, DISCARDING {len(datasets)-1} old datasets, processing only the latest one\n")
+        sys.stdout.write(f"Python: Found {len(datasets)} datasets, DISCARDING {len(datasets)-1} old datasets, processing only the latest one (index #{latest_data['index']}).\n")
         sys.stdout.flush()
         
         # 手动清理丢弃的数据，释放内存
         for i in range(len(datasets) - 1):
-            del datasets[i]['X']
-            del datasets[i]['y']
+            del datasets[i]
         
         return latest_data
+
 
 def send_string_list(fifo_write, string_list):
     """
@@ -196,6 +196,7 @@ def send_string_list(fifo_write, string_list):
 
 def signal_result_ready(request_id):
     """创建信号文件告知Julia结果已准备好"""
+    # Using a zero-padded format for the index
     signal_filename = f"python_result_ready_{request_id:06d}"
     try:
         with open(signal_filename, 'w') as f:
@@ -206,8 +207,8 @@ def signal_result_ready(request_id):
         sys.stderr.write(f"Error creating signal file: {e}\n")
 
 def main():
-    sys.stdout = open(STDOUT_LOG_FILE, 'w')
-    sys.stderr = open(ERROR_LOG_FILE, 'w')
+    sys.stdout = open(STDOUT_LOG_FILE, 'w', buffering=1) # Use line buffering
+    sys.stderr = open(ERROR_LOG_FILE, 'w', buffering=1) # Use line buffering
     if not torch.cuda.is_available(): 
         sys.stdout.write("CUDA not available.\n")
         return
@@ -220,7 +221,7 @@ def main():
              open(PYTHON_TO_JULIA_PIPE, 'wb') as fifo_write:
             sys.stdout.write("Python ROBUST process started and listening...\n")
             sys.stdout.flush()
-            request_count = 0
+            # request_count is no longer needed, as we use the index from Julia
             
             while True:
                 sys.stdout.write("\n" + "="*50 + "\n")
@@ -236,15 +237,13 @@ def main():
                         time.sleep(0.1)
                         continue
                     
-                    request_count += 1
-                    
-                    # 提取数据
-                    trigger_value = latest_data['trigger'] 
+                    # 提取数据和索引
+                    global_index = latest_data['index'] 
                     X_np = latest_data['X']
                     y_np = latest_data['y']
                     
                     # 转换为torch张量并处理
-                    sys.stdout.write(f"Processing request #{request_count}: X shape {X_np.shape}, y shape {y_np.shape}\n")
+                    sys.stdout.write(f"Processing job with index #{global_index}: X shape {X_np.shape}, y shape {y_np.shape}\n")
                     
                     if not X_np.flags.writeable:
                         X_np = X_np.copy()
@@ -253,28 +252,29 @@ def main():
                     
                     X_torch = torch.from_numpy(X_np).to('cuda')
                     y_torch = torch.from_numpy(y_np).to('cuda')
-                    sys.stdout.write(f"Successfully converted to CUDA tensors for request #{request_count}.\n")
+                    sys.stdout.write(f"Successfully converted to CUDA tensors for job #{global_index}.\n")
                     sys.stdout.flush()
                     
                     # 进行PSRN处理
                     psrn.current_expr_ls = variables_name
                     n_top = 10
                     expr_best_ls, MSE_min_ls = psrn.get_best_expr_and_MSE_topk(X_torch, y_torch, n_top)
-                    sys.stdout.write(f"Request #{request_count} completed. First expression: {expr_best_ls[0] if expr_best_ls else 'None'}\n")
+                    sys.stdout.write(f"Job #{global_index} completed. First expression: {expr_best_ls[0] if expr_best_ls else 'None'}\n")
                     
-                    # 手动清理torch张量
+                    # 手动清理torch张量和数据字典
                     del X_torch, y_torch
-                    del latest_data  # 清理数据字典
+                    del latest_data
+                    gc.collect() # Trigger garbage collection
                     
                     # 发送结果
-                    sys.stdout.write(f"About to send string list to Julia for request #{request_count}...\n")
+                    sys.stdout.write(f"About to send string list to Julia for job #{global_index}...\n")
                     sys.stdout.flush()
                     send_string_list(fifo_write, expr_best_ls)
-                    sys.stdout.write(f"Finished sending string list to Julia for request #{request_count}\n")
+                    sys.stdout.write(f"Finished sending string list to Julia for job #{global_index}\n")
                     sys.stdout.flush()
                     
                     # 创建信号文件通知Julia结果已准备好
-                    signal_result_ready(request_count)
+                    signal_result_ready(global_index)
                     
                 except BrokenPipeError:
                     sys.stdout.write("Broken pipe detected, Julia process may have terminated\n")

@@ -861,6 +861,102 @@ function _warmup_search!(
     end
     return nothing
 end
+
+
+# Check and process PSRN results
+# function process_psrn_results!(
+#     new_expressions::Any,
+#     hall_of_fame::HallOfFame,
+#     dataset::Dataset,
+#     options::AbstractOptions
+# )
+
+#     for psrn_expr in new_expressions
+#         # Create a new Expression using target type
+#         converted_expr = Expression(
+#             psrn_expr.tree;  # Only keep the tree structure
+#             operators=nothing,  # Set to nothing
+#             variable_names=nothing,  # Set to nothing
+#         )
+
+#         member = PopMember(dataset, converted_expr, options; deterministic=false)
+#         # @info "PSRN member: $member"
+#         # @info "type of member: $(typeof(member))"
+#         update_hall_of_fame!(hall_of_fame, [member], options)
+#     end
+#     @info "Added PSRN results to hall of fame"
+
+# end
+
+# --------------------
+# 修复后的函数
+# --------------------
+# function process_psrn_results!(
+#     new_expressions::Any,
+#     hall_of_fame::HallOfFame,
+#     # 通过 where {T, L} 捕获数据集的类型
+#     dataset::Dataset{T, L},
+#     options::AbstractOptions
+# ) where {T, L} # 添加类型参数声明
+
+#     # 获取表达式节点的基础类型，例如 Node{T}
+#     NodeType = typeof(options).parameters[4]
+
+#     for psrn_expr in new_expressions
+#         # 1. 显式地将表达式树转换为与数据集匹配的类型 T
+#         #    例如，如果 psrn_expr.tree 是 Node{Float64}，而 T 是 Float32，
+#         #    这将把它转换为 Node{Float32}。
+#         tree = convert(NodeType, psrn_expr.tree)
+
+#         # 2. 用转换后的树创建新的 Expression 对象
+#         #    现在这个表达式的数值类型将是 T (例如 Float32)，与数据集匹配
+#         converted_expr = Expression(
+#             tree;
+#             operators=nothing,
+#             variable_names=nothing,
+#         )
+
+#         # 现在 PopMember 的参数类型将是匹配的：
+#         # PopMember(::Dataset{T, ...}, ::Expression{T, ...}, ...)
+#         member = PopMember(dataset, converted_expr, options; deterministic=false)
+#         update_hall_of_fame!(hall_of_fame, [member], options)
+#     end
+#     @info "Added PSRN results to hall of fame"
+# end
+
+
+function process_psrn_results!(
+    new_expressions::Any,
+    hall_of_fame::HallOfFame,
+    # 通过 where {T, L} 捕获数据集的类型，例如 T = Float32
+    dataset::Dataset{T, L},
+    options::AbstractOptions
+) where {T, L}
+
+    # 如果没有新的表达式，直接返回
+    if isempty(new_expressions)
+        @info "No new PSRN expressions to process."
+        return
+    end
+
+    for psrn_expr in new_expressions
+        # 1. 直接将表达式树转换为使用目标类型 T 的树。
+        #    `convert(Node{T}, ...)` 是一个很健壮的方法，
+        #    它会递归地转换树中的所有节点。
+        #    例如，将 Node{Float64} 树转换为 Node{Float32} 树。
+        converted_tree = convert(Node{T}, psrn_expr.tree)
+
+        # 2. 直接用转换后的树来创建 PopMember。
+        #    构造函数 PopMember(::Dataset{T, ...}, ::Node{T, ...}, ::Options, ...) 是存在的。
+        #    这样就保证了类型匹配。
+        member = PopMember(dataset, converted_tree, options; deterministic=false)
+
+        update_hall_of_fame!(hall_of_fame, [member], options)
+    end
+    @info "✨✨✨Added PSRN results to hall of fame"
+
+end
+
 function _main_search_loop!(
     state::AbstractSearchState{T,L,N},
     datasets,
@@ -968,8 +1064,8 @@ function _main_search_loop!(
 
             ##################################################################################################################
 
-            # N_PSRN_INPUT = 5
-            N_PSRN_INPUT = 4
+            N_PSRN_INPUT = 5
+            # N_PSRN_INPUT = 4
             n_variables = 3
             n_top = 10
             max_samples = 20
@@ -981,14 +1077,18 @@ function _main_search_loop!(
                             n_variables,
                             max_samples
                         )
+
             # @show X_mapped_sampled, y_sampled
             # @show
 
-            push!(history_subtrees_list, current_expr_ls)
-            # @info "pushing current_expr_ls into 🔥 history_subtrees_list"
-            @show current_expr_ls
 
-            @info "in👉 communicate_with_python"
+            push!(history_subtrees_list, current_expr_ls)
+
+            # @info "pushing current_expr_ls into 🔥 history_subtrees_list"
+            # @show current_expr_ls
+
+
+            # @info "in👉 communicate_with_python"
             nodes_from_python, received_index = communicate_with_python(
                 state.fifo_out,
                 state.fifo_in,
@@ -998,89 +1098,66 @@ function _main_search_loop!(
                 global_index
             ) 
 
+
             global_index += 1
             
             if received_index != nothing
-                @info "✨received_index $(received_index)"
+                # @info "✨received_index $(received_index)"
                 history_expr_ls = history_subtrees_list[received_index+1]
-                # NEW, CORRECTED LINE
-                # base_nodes_for_replacement = Node[expr.tree for expr in history_expr_ls]
-
-
-                # history_expr_ls # type : Vector{Expressions}
-                # base_nodes_for_replacement = history_expr_ls
-
                 base_nodes_for_replacement = [expr.tree for expr in history_expr_ls]
-                
-
-
-                # base_nodes_for_replacement = history_expr_ls.tree
-                # Now, call the function with the correctly typed arguments.
-                # nodes_from_python should already be a Vector{Node} from your parser.
-                # base_nodes_for_replacement is now also a Vector{Node}.
-                nodes_from_python_replaced = replace_base_expressions(
-                    nodes_from_python,
-                    base_nodes_for_replacement
-                )
-            
-                final_expressions = [
+                python_var_names = ["v$i" for i in 1:N_PSRN_INPUT]
+                nodes_from_python_expression = [
                     Expression(
                         node;
-                        # operators=options.operators,
                         operators=nothing,
-                        # variable_names=dataset.variable_names
                         variable_names=nothing
                     )
-                    for node in nodes_from_python_replaced
+                    for node in nodes_from_python
                 ]
-                @info "nodes_from_python✅"
-                # @show nodes_from_python
-                for expr in nodes_from_python
-                    # @info typeof(expr) # Node{Float32, 2}
-                    expr_string = string_tree(expr, nothing)
-                    @info expr_string
-                end
+                base_nodes_for_replacement_expression = [
+                    Expression(
+                        node;
+                        operators=nothing,
+                        variable_names=nothing
+                    )
+                    for node in base_nodes_for_replacement
+                ]
 
-                @info "nodes_from_python_replaced✅"
-                # @show nodes_from_python_replaced  
-
-                for expr in nodes_from_python_replaced
-                    # @info typeof(expr) # Node{Float32, 2}
-                    expr_string = string_tree(expr, nothing)
-                    @info expr_string
-                end
-
-                
-                @info "history_expr_ls✅"
-                @show history_expr_ls
-
-                # @info "base_nodes_for_replacement🧪🧪🧪"
-                # @show base_nodes_for_replacement
-                @info "final_expressions 🔥🔥🔥🔥🔥🔥"
-                # @info "typeof final_expressions: $(typeof(final_expressions))"
+                nodes_from_python_replaced_expression = replace_base_expressions(
+                    nodes_from_python_expression,
+                    base_nodes_for_replacement_expression
+                )
+                final_expressions = nodes_from_python_replaced_expression
 
 
-                # Vector{Expression{Float32, Node{Float32, 2},
-                # @NamedTuple{operators::OperatorEnum{Tuple{Tuple{typeof(cos), 
-                # typeof(exp), typeof(sin), typeof(safe_log)},
-                #  Tuple{typeof(+), typeof(*), typeof(/), typeof(-)}}}, variable_names::Vector{String}}}}
+                # @info "base_nodes_for_replacement_expression ✅" 
+                # for expr in base_nodes_for_replacement_expression
+                #     @info expr
+                # end
+                # @info "nodes_from_python_expression ✅"
+                # for expr in nodes_from_python_expression
+                #     @info expr
+                # end
+                # @info "history_expr_ls✅"
+                # @show history_expr_ls
+                # @info "final_expressions 🔥🔥🔥🔥🔥🔥"
+                # for expr in final_expressions
+                #     @info expr
+                # end
 
 
-                # @show final_expressions
-                for expr in final_expressions
-                    # @info typeof(expr) # Expression{Float32, Node{Float32, 2}, @NamedTuple{operators::Nothing, variable_names::Nothing}}
-                    expr_string = string_tree(expr, nothing)
-                    @info expr_string
-                end
-
-                @info "out👈 communicate_with_python"
-
-            else
-                @info "✨🚫 no received_index"
-                
+                process_psrn_results!(
+                    final_expressions, state.halls_of_fame[j], dataset, options
+                )
+                # @info "out👈 communicate_with_python"
 
             end
-                
+
+
+
+
+
+
             if options.save_to_file
                 save_to_file(dominating, nout, j, dataset, options, ropt)
             end

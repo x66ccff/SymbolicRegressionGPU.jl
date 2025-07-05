@@ -287,15 +287,15 @@ function psrn_preprocess(
     top_subtrees = select_top_subtrees(common_subtrees, N_PSRN_INPUT, options, n_variables)
     shuffle!(top_subtrees)
 
+    # # end 
+    # @info "Selected subtrees: ================ "
+    # @info "👇"
+    # for expr in top_subtrees
+    #     # expr type is node
+    #     string = string_tree(expr, options)
+    #     @info string
     # end 
-    @info "Selected subtrees: ================ "
-    @info "👇"
-    for expr in top_subtrees
-        # expr type is node
-        string = string_tree(expr, options)
-        @info string
-    end 
-    @info "👆"
+    # @info "👆"
 
     X_mapped = evaluate_subtrees(top_subtrees, dataset, options)
 
@@ -568,7 +568,7 @@ function communicate_with_python(
         # ---- END MODIFIED PART ----
         
         ASYNC_STATE.pending_requests += 1
-        println("🔍Julia: Data with index #$global_index sent to Python. Pending requests: $(ASYNC_STATE.pending_requests)")
+        # println("🔍Julia: Data with index #$global_index sent to Python. Pending requests: $(ASYNC_STATE.pending_requests)")
             # This function now correctly returns a `Vector{Node}`
         return nodes_from_python, received_index
     catch e
@@ -1058,89 +1058,121 @@ function test_conversion(options::AbstractOptions)
     end
 end
 
+function convert_node_type(node::AbstractNode, target_T::Type)
+    # --- 关键修正：明确处理所有叶子节点情况 ---
+    if node.degree == 0
+        if node.constant
+            # It's a constant leaf node
+            return Node{target_T}(; val=convert(target_T, node.val))
+        else
+            # It's a variable leaf node
+            return Node{target_T}(; feature=node.feature)
+        end
+    elseif node.degree == 1
+        new_l = convert_node_type(node.l, target_T)
+        return Node{target_T}(; op=node.op, l=new_l)
+    elseif node.degree == 2
+        new_l = convert_node_type(node.l, target_T)
+        new_r = convert_node_type(node.r, target_T)
+        return Node{target_T}(; op=node.op, l=new_l, r=new_r)
+    else
+        # This should not be reached with standard operators
+        error("Unsupported node degree encountered in `convert_node_type`: $(node.degree)")
+    end
+end
+
 
 """
-    _recursive_replace(node::Node, base_expressions::Vector{Node})
+    _recursive_replace(node, base_expression_trees, target_T)
 
-Recursively traverses a node tree. If a variable node (a leaf representing v_i)
-is found, it's replaced with the corresponding tree from `base_expressions`.
-Otherwise, it rebuilds the tree with the results of the recursive calls on its children.
+Recursively traverses a high-level node tree, replacing variable nodes with corresponding
+base expression trees. It ensures that all nodes in the final tree have the
+type `target_T`.
 """
-function _recursive_replace(node::Any, base_expressions::Any)
-    # Base Case 1: If the node is a constant, return it as is.
+function _recursive_replace(
+    node::AbstractNode, 
+    base_expression_trees::Vector{<:AbstractNode},
+    target_T::Type
+)
+    # Base case for constants in the high-level expression (e.g., v1 + 5.0)
     if node.constant
-        return node
+        return Node{target_T}(; val=convert(target_T, node.val))
     end
 
-    # Base Case 2: If the node is a variable (from Python, e.g., v_i),
-    # this is where the replacement happens.
-    # Your parser correctly converts v_i to feature=(i+1).
+    # Base case for variables (placeholders) in the high-level expression
     if node.degree == 0 && !node.constant
         feature_index = node.feature
-
-        # Check if the index is valid for our base expressions list.
-        if 1 <= feature_index <= length(base_expressions)
-            # Replace this variable leaf with the entire corresponding tree.
-            # We return a copy to avoid aliasing issues if the same base
-            # expression is used multiple times.
-            return copy_node(base_expressions[feature_index])
+        if 1 <= feature_index <= length(base_expression_trees)
+            # Get the base tree to substitute
+            base_tree_to_insert = base_expression_trees[feature_index]
+            # Convert the entire base tree to the target type before inserting
+            return convert_node_type(base_tree_to_insert, target_T)
         else
-            # This case should ideally not happen if Python and Julia are in sync.
-            # It means Python asked for a variable v_i for which we have no base expression.
-            @warn "Feature index $feature_index from Python is out of bounds for the base expression list (size $(length(base_expressions))). The original variable node will be kept."
-            return node
+            @warn "Feature index $feature_index is out of bounds for base expressions (size=$(length(base_expression_trees))). Keeping original variable."
+            return Node{target_T}(; feature=node.feature)
         end
     end
 
-    # Recursive Step: If the node is an operator, process its children.
+    # Recursive step for operators
     if node.degree == 1
-        # Unary operator
-        new_l = _recursive_replace(node.l, base_expressions)
-        return Node(node.op, new_l)
+        new_l = _recursive_replace(node.l, base_expression_trees, target_T)
+        return Node{target_T}(; op=node.op, l=new_l)
     elseif node.degree == 2
-        # Binary operator
-        new_l = _recursive_replace(node.l, base_expressions)
-        new_r = _recursive_replace(node.r, base_expressions)
-        return Node(node.op, new_l, new_r)
+        new_l = _recursive_replace(node.l, base_expression_trees, target_T)
+        new_r = _recursive_replace(node.r, base_expression_trees, target_T)
+        return Node{target_T}(; op=node.op, l=new_l, r=new_r)
     else
-        # Should not happen for standard operators.
-        @warn "Encountered a node with unsupported degree: $(node.degree). Returning as is."
-        return node
+        @warn "Unsupported degree in `_recursive_replace`: $(node.degree). Attempting to convert node as is."
+        return convert_node_type(node, target_T)
     end
 end
 
+
 """
-    replace_base_expressions(nodes_from_python, current_expr_node_ls)
+    replace_base_expressions(high_level_expressions, base_expressions)
 
-Takes a list of high-level expression trees from Python (where variables
-like `v_0`, `v_1` are placeholders) and a list of base expression trees
-from Julia. It substitutes each `v_i` placeholder with the i-th base
-expression tree.
-
-# Arguments
-- `nodes_from_python::Vector{Node}`: A vector of `Node` objects parsed from Python's output.
-  A variable `v_i` in Python's string is expected to be parsed as a `Node` with `feature = i + 1`.
-- `current_expr_node_ls::Vector{Node}`: A vector of `Node` objects representing the
-  basis functions (e.g., `x1+x2`, `sin(x3)`, etc.) that should be substituted in.
-
-# Returns
-- `Vector{Node}`: A new vector of `Node` objects representing the final, fully-formed
-  expressions.
+Substitutes placeholder variables in high-level expressions with corresponding base expressions.
+This function is robust to type mismatches (e.g., Float32 vs Float64) between the
+expression sets.
 """
 function replace_base_expressions(
-    nodes_from_python::Any,
-    current_expr_node_ls::Any
+    high_level_expressions::Vector{<:Expression},
+    base_expressions::Vector{<:Expression}
 )
-    nodes_from_python_replaced = Node[]
+    # @info "替换开始: 👇👇👇👇👇👇👇👇👇👇"
+    # @debug "High-level expressions to be replaced:" high_level_expressions
+    # @debug "Base expressions for substitution:" base_expressions
 
-    for python_node in nodes_from_python
-        # For each high-level tree, perform the recursive replacement
-        replaced_node = _recursive_replace(python_node, current_expr_node_ls)
-        push!(nodes_from_python_replaced, replaced_node)
+    if isempty(high_level_expressions) || isempty(base_expressions)
+        @warn "Input expressions are empty, returning an empty result."
+        return Expression[]
     end
 
-    return nodes_from_python_replaced
+    base_expression_trees = [get_contents(expr) for expr in base_expressions]
+    final_expr_template = base_expressions[1]
+    template_tree = get_contents(final_expr_template)
+    target_T = eltype(template_tree)
+    
+    # @info "确定目标节点类型为: $target_T"
+
+    ret = [
+        begin
+            high_level_tree = get_contents(high_level_expr)
+            replaced_tree = _recursive_replace(high_level_tree, base_expression_trees, target_T)
+            with_contents(final_expr_template, replaced_tree)
+        end
+        for high_level_expr in high_level_expressions
+    ]
+    
+    # @debug "Final replaced expressions:" ret
+    # @info "替换结束 👆👆👆👆👆👆👆👆👆👆"
+
+    return ret
 end
+
 
 
 history_subtrees_list = []
+
+
+

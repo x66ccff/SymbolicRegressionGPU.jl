@@ -18,8 +18,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
 operators = ['Add','Mul','SemiSub','SemiDiv','Sin','Cos','Exp','Log']
-# n_psrn_input = 5
-n_psrn_input = 4
+n_psrn_input = 5
+# n_psrn_input = 4
 print(operators)
 
 cnt_success = 0

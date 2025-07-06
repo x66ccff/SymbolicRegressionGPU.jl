@@ -1159,9 +1159,9 @@ function _main_search_loop!(
                 # end
 
 
-                # process_psrn_results!(
-                #     final_expressions, state.halls_of_fame[j], dataset, options
-                # )
+                process_psrn_results!(
+                    final_expressions, state.halls_of_fame[j], dataset, options
+                )
                 # @info "out👈 communicate_with_python"
 
             end

@@ -43,7 +43,7 @@ function select_top_subtrees(
     filtered_subtrees = filter(pair -> begin
         node = pair.first
         comp = compute_complexity(node, options)
-        1 <= comp <= 10
+        1 <= comp <= 5
     end, common_subtrees)
 
     # 将字典转成 (node, ratio_score) 的元组数组
@@ -53,7 +53,7 @@ function select_top_subtrees(
     scored_nodes = Node[]
     if !isempty(filtered_pairs)
         # 根据 ratio_score 降序排序
-        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.5*randn()), rev = true)
+        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.01*randn()), rev = true)
         scored_nodes = [p.first for p in sorted_pairs]
     end
 
@@ -515,10 +515,11 @@ function communicate_with_python(
     X_mapped_sampled::Matrix{<:AbstractFloat},
     y_sampled::Vector{<:AbstractFloat},
     options::AbstractOptions,
-    global_index::Int64
+    global_index::Int64,
+    current_expr_ls::Any
 )
     # FIX 1: Initialize a typed vector of Nodes, not a Vector{Any}
-    nodes_from_python = Node[]
+    expr_from_python = String[]
 
     try
         # First, check for any results that might be ready
@@ -531,16 +532,7 @@ function communicate_with_python(
                 write(f, "🔍Received $(length(expr_list)) expressions from Python for index #$received_index\n")
                 for (i, expr) in enumerate(expr_list)
                     write(f, "      [$i]: $expr\n")
-                    node = convert_python_tree_to_nodes(expr, options)
-
-                    # FIX 2: Only push valid Nodes into the typed vector.
-                    # This prevents `nothing` from ever being an element.
-                    if !isnothing(node)
-                        push!(nodes_from_python, node)
-                        write(f, " 🔍node [$i]: $node\n")
-                    else
-                        write(f, " 🔍node [$i]: (failed to parse)\n")
-                    end
+                    push!(expr_from_python, expr)
                 end
                 write(f, "\n")
             end
@@ -567,10 +559,28 @@ function communicate_with_python(
         flush(fifo_out)
         # ---- END MODIFIED PART ----
         
+        if global_index == 0
+            empty!(history_subtrees_list)
+            empty!(history_number_list)
+        end
+        push!(history_subtrees_list, deepcopy(current_expr_ls))
+        push!(history_number_list, global_index)
+
+
+        open("julia_send.log", "a") do f
+            write(f, "writing global_index = $(global_index) \n")
+            write(f, "now length(history_subtrees_list) = $(length(history_subtrees_list)) \n")
+            write(f, "now length(history_number_list) = $(length(history_number_list)) \n")
+            for (i, expr) in enumerate(current_expr_ls)
+                write(f, "      [$i]: $expr\n")
+            end
+            write(f, "\n")
+        end
+
         ASYNC_STATE.pending_requests += 1
         # println("🔍Julia: Data with index #$global_index sent to Python. Pending requests: $(ASYNC_STATE.pending_requests)")
             # This function now correctly returns a `Vector{Node}`
-        return nodes_from_python, received_index
+        return expr_from_python, received_index
     catch e
         @warn "🔍Communication error in Julia" exception=(e, catch_backtrace())
     end
@@ -1173,6 +1183,27 @@ end
 
 
 history_subtrees_list = []
+history_number_list = []
 
 
 
+function replace_v_indices(strings_list::Vector{String})
+    result = String[]
+    
+    for str in strings_list
+        new_str = str
+        # 匹配 v_ 后面跟数字的模式（没有花括号）
+        while true
+            m = match(r"v_(\d+)", new_str)
+            if m === nothing
+                break
+            end
+            index = parse(Int, m.captures[1]) + 1
+            replacement = "vexprs[$index]"
+            new_str = replace(new_str, m.match => replacement, count=1)
+        end
+        push!(result, new_str)
+    end
+    
+    return result
+end

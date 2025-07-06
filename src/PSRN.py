@@ -18,6 +18,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
 operators = ['Add','Mul','SemiSub','SemiDiv','Sin','Cos','Exp','Log']
+n_top = 10
 n_psrn_input = 5
 # n_psrn_input = 4
 print(operators)
@@ -257,7 +258,7 @@ def main():
                     
                     # 进行PSRN处理
                     psrn.current_expr_ls = variables_name
-                    n_top = 10
+                    
                     expr_best_ls, MSE_min_ls = psrn.get_best_expr_and_MSE_topk(X_torch, y_torch, n_top)
                     sys.stdout.write(f"Job #{global_index} completed. First expression: {expr_best_ls[0] if expr_best_ls else 'None'}\n")
                     

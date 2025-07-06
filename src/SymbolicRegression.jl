@@ -954,11 +954,14 @@ function process_psrn_results!(
         # 2. 直接用转换后的树来创建 PopMember。
         #    构造函数 PopMember(::Dataset{T, ...}, ::Node{T, ...}, ::Options, ...) 是存在的。
         #    这样就保证了类型匹配。
+        @info "==============="
         @info "cost $cost"
         @info "loss $loss"
         # @info "new member: $(member)"
         @info "new member:"
-        @info string_tree(member.tree, options)
+        # @info string_tree(member.tree, options)
+        @info "==============="
+
         
 
         update_hall_of_fame!(hall_of_fame, [member], options)
@@ -1092,72 +1095,49 @@ function _main_search_loop!(
             # @show
 
 
-            push!(history_subtrees_list, current_expr_ls)
-
-            # @info "pushing current_expr_ls into 🔥 history_subtrees_list"
-            # @show current_expr_ls
+            # push!(history_subtrees_list, current_expr_ls)
+            # push!(history_number_list, global_index)
+            
 
 
             # @info "in👉 communicate_with_python"
-            nodes_from_python, received_index = communicate_with_python(
+            expr_from_python, received_index = communicate_with_python(
                 state.fifo_out,
                 state.fifo_in,
                 X_mapped_sampled,
                 y_sampled,
                 options,
-                global_index
+                global_index,
+                current_expr_ls
             ) 
 
 
             global_index += 1
             
             if received_index != nothing
-                # @info "✨received_index $(received_index)"
-                history_expr_ls = history_subtrees_list[received_index+1]
-                base_nodes_for_replacement = [expr.tree for expr in history_expr_ls]
-                python_var_names = ["v$i" for i in 1:N_PSRN_INPUT]
-                nodes_from_python_expression = [
-                    Expression(
-                        node;
-                        operators=nothing,
-                        variable_names=nothing
-                    )
-                    for node in nodes_from_python
-                ]
-                base_nodes_for_replacement_expression = [
-                    Expression(
-                        node;
-                        operators=nothing,
-                        variable_names=nothing
-                    )
-                    for node in base_nodes_for_replacement
-                ]
+                
+                final_expressions = []
+                # 在你的函数中
+                vexprs = history_subtrees_list[received_index + 1]
+                vnumber = history_number_list[received_index + 1]
+                @info "🤔vnumber $(vnumber)"
+                @info "🔥🔥🔥vexprs start"
+                @info "🔥 $(received_index+1) 🔥🔥vexprs:"
+                for e in vexprs
+                    @info e
+                end
+                @info "🔥🔥🔥vexprs end🔥🔥🔥🔥🔥"
+                expr_from_python_replaced = replace_v_indices(expr_from_python)
 
-                nodes_from_python_replaced_expression = replace_base_expressions(
-                    nodes_from_python_expression,
-                    base_nodes_for_replacement_expression
-                )
-                final_expressions = nodes_from_python_replaced_expression
-
-
-                # @info "base_nodes_for_replacement_expression ✅" 
-                # for expr in base_nodes_for_replacement_expression
-                #     @info expr
-                # end
-                # @info "nodes_from_python_expression ✅"
-                # for expr in nodes_from_python_expression
-                #     @info expr
-                # end
-                # @info "history_expr_ls✅"
-                # @show history_expr_ls
-                # @info "final_expressions 🔥🔥🔥🔥🔥🔥"
-                # for expr in final_expressions
-                #     # @info expr
-                #     expr_str = string_tree(expr, nothing)
-                #     @info expr_str
-
-                # end
-
+                for expr in expr_from_python_replaced
+                    @info expr
+                    expr_evaled = Meta.parse(expr)
+                    # 使用 @eval 在当前模块作用域中执行，并先定义 vexprs
+                    @eval vexprs = $vexprs  # 将局部变量传递到全局作用域
+                    result = eval(expr_evaled) 
+                    @show result
+                    push!(final_expressions, result)
+                end
 
                 process_psrn_results!(
                     final_expressions, state.halls_of_fame[j], dataset, options

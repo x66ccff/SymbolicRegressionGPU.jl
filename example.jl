@@ -16,7 +16,10 @@ options = SymbolicRegression.Options(;
     timeout_in_seconds=30
 )
 
-hall_of_fame = equation_search(X, y; options=options, parallelism=:multithreading)
+hall_of_fame = equation_search(X, y;
+                        options=options, 
+                        parallelism=:multithreading, 
+                        niterations=30000000)
 
 dominating = calculate_pareto_frontier(hall_of_fame)
 

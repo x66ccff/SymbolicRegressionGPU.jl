@@ -5,7 +5,7 @@
 # clear && julia -t 16 example.jl --project=.
 
 using SymbolicRegression
-using LoopVectorization
+# using LoopVectorization
 using DelimitedFiles  # 用于读取TSV文件
 using Random
 function main()
@@ -23,31 +23,31 @@ function main()
     # y = y[indices]     # 获取对应的标签
 
     options = SymbolicRegression.Options(;
-        timeout_in_seconds=60,
+        timeout_in_seconds=360,
         binary_operators=[+, *, /, -],
         unary_operators=[sin, cos, exp, log, sqrt],
         # population_size=100,
         # populations=15,
         batching=true,
         batch_size=100,
-        adaptive_parsimony_scaling=1_000.0,
-        parsimony=0.0,
-        maxsize=30,
+        # adaptive_parsimony_scaling=1_000.0,
+        # parsimony=0.0,
+        maxsize=40,
         maxdepth=20,
-        turbo=true,
+        # turbo=true,
         # should_optimize_constants=false,
         # optimizer_iterations=4,
         # optimizer_f_calls_limit=1000,
         # optimizer_probability=0.02,
-        complexity_of_constants=3,
+        # complexity_of_constants=3,
         early_stop_condition=(l, c) -> (l < 1e-6 && c <= 5) || (l < 1e-10 && c <= 10),
-        # constraints = [
-        #     sin => 9,
-        #     cos => 9,
-        #     exp => 9,
-        #     log => 9,
-        #     sqrt => 9
-        # ],
+        constraints = [
+            sin => 9,
+            cos => 9,
+            exp => 9,
+            log => 9,
+            sqrt => 9
+        ],
         # nested_constraints = [
         #     sin => [
         #         sin => 0,

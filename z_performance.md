@@ -14,7 +14,7 @@ options = SymbolicRegression.Options(;
 
 # clear && julia -t 1 example.jl --project=.
 
-## w/PSRN
+## w/PSRN （14/30）
 
 -4
 -4
@@ -49,7 +49,23 @@ options = SymbolicRegression.Options(;
 -3
 -14
 
-# w/o PSRN
+# w/ PSRN (fix identity + 8 input + 5 sample)
+clear && julia -t 1 example.jl --project=.
+
+-7
+0
+0
+-4
+0
+0
+0
+0
+0
+0
+0
+0
+
+# w/o PSRN （4/15）
 
 -5
 -5

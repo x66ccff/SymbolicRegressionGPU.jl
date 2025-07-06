@@ -75,7 +75,8 @@ class Neg_op:
         self.is_unary = True
 
     def get_expr(self, sub_expr):
-        return "(-({}))".format(sub_expr)
+        # return "(-({}))".format(sub_expr)
+        return "(0-({}))".format(sub_expr)
 
     def transform_inputs(self, x):
         return -x

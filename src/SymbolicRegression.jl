@@ -1077,11 +1077,11 @@ function _main_search_loop!(
 
             ##################################################################################################################
 
-            N_PSRN_INPUT = 5
+            N_PSRN_INPUT = 8
             # N_PSRN_INPUT = 4
-            n_variables = 3
-            n_top = 10
-            max_samples = 20
+            n_variables = length(dataset.variable_names)
+            n_top = 50
+            max_samples = 5
             X_mapped_sampled, y_sampled, current_expr_ls = psrn_preprocess(
                             dominating,
                             dataset,
@@ -1120,22 +1120,22 @@ function _main_search_loop!(
                 # 在你的函数中
                 vexprs = history_subtrees_list[received_index + 1]
                 vnumber = history_number_list[received_index + 1]
-                @info "🤔vnumber $(vnumber)"
-                @info "🔥🔥🔥vexprs start"
-                @info "🔥 $(received_index+1) 🔥🔥vexprs:"
-                for e in vexprs
-                    @info e
-                end
-                @info "🔥🔥🔥vexprs end🔥🔥🔥🔥🔥"
+                # @info "🤔vnumber $(vnumber)"
+                # @info "🔥🔥🔥vexprs start"
+                # @info "🔥 $(received_index+1) 🔥🔥vexprs:"
+                # for e in vexprs
+                #     @info e
+                # end
+                # @info "🔥🔥🔥vexprs end🔥🔥🔥🔥🔥"
                 expr_from_python_replaced = replace_v_indices(expr_from_python)
 
                 for expr in expr_from_python_replaced
-                    @info expr
+                    # @info expr
                     expr_evaled = Meta.parse(expr)
                     # 使用 @eval 在当前模块作用域中执行，并先定义 vexprs
                     @eval vexprs = $vexprs  # 将局部变量传递到全局作用域
                     result = eval(expr_evaled) 
-                    @show result
+                    # @show result
                     push!(final_expressions, result)
                 end
 

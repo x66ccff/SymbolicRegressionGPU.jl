@@ -17,9 +17,9 @@ from PSRNmodels import PSRN
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
-operators = ['Add','Mul','SemiSub','SemiDiv','Sin','Cos','Exp','Log']
-n_top = 10
-n_psrn_input = 5
+operators = ['Add','Mul','Identity','Neg','Inv','Sin','Cos','Exp','Log']
+n_top = 50
+n_psrn_input = 8
 # n_psrn_input = 4
 print(operators)
 
@@ -144,8 +144,8 @@ def read_latest_data_only(fifo_read):
         sys.stdout.flush()
         
         # 手动清理丢弃的数据，释放内存
-        for i in range(len(datasets) - 1):
-            del datasets[i]
+        # for i in range(len(datasets) - 1):
+        #     del datasets[i]
         
         return latest_data
 

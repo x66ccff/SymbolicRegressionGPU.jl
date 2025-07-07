@@ -17,7 +17,7 @@ from PSRNmodels import PSRN
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
-operators = ['Add','Mul','Identity','Neg','Inv','Sin','Cos','Exp','Log']
+operators = ['Add','Mul','Identity','Neg','Inv','Sin','Cos','Exp','Log','Pow3']
 n_top = 50
 n_psrn_input = 8
 # n_psrn_input = 4

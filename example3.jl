@@ -4,7 +4,6 @@
 # julia example.jl
 
 using SymbolicRegression
-using LoopVectorization
 using DelimitedFiles  # 用于读取TSV文件
 
 function main()
@@ -16,18 +15,18 @@ function main()
     y = Float32.(data[:, 5])  # 最后一列是target
 
     options = SymbolicRegression.Options(;
-        timeout_in_seconds=600,
+        timeout_in_seconds=360,
         binary_operators=[+, *, /, -],
         unary_operators=[sin, cos, exp, log, sqrt],
         population_size=100,
         populations=15,
         batching=true,
         batch_size=10,
-        adaptive_parsimony_scaling=1_000.0,
-        parsimony=0.0,
-        maxsize=30,
+        # adaptive_parsimony_scaling=1_000.0,
+        # parsimony=0.0,
+        maxsize=40,
         maxdepth=20,
-        turbo=true,
+        # turbo=true,
         # complexity_of_constants=3,
         # should_optimize_constants=false,
         # optimizer_iterations=4,
@@ -42,33 +41,33 @@ function main()
             log => 9,
             sqrt => 9
         ],
-        nested_constraints = [
-            sin => [
-                sin => 0,
-                cos => 0,
-                exp => 1,
-                log => 1,
-                sqrt => 1
-            ],
-            cos => [
-                sin => 0,
-                cos => 0,
-                exp => 1,
-                log => 1,
-                sqrt => 1
-            ],
-            exp => [
-                exp => 0,
-                log => 0
-            ],
-            log => [
-                exp => 0,
-                log => 0
-            ],
-            sqrt => [
-                sqrt => 0
-            ]
-        ]
+        # nested_constraints = [
+        #     sin => [
+        #         sin => 0,
+        #         cos => 0,
+        #         exp => 1,
+        #         log => 1,
+        #         sqrt => 1
+        #     ],
+        #     cos => [
+        #         sin => 0,
+        #         cos => 0,
+        #         exp => 1,
+        #         log => 1,
+        #         sqrt => 1
+        #     ],
+        #     exp => [
+        #         exp => 0,
+        #         log => 0
+        #     ],
+        #     log => [
+        #         exp => 0,
+        #         log => 0
+        #     ],
+        #     sqrt => [
+        #         sqrt => 0
+        #     ]
+        # ]
     )
 
     hall_of_fame = equation_search(X, y;

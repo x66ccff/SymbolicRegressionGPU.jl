@@ -53,7 +53,7 @@ function select_top_subtrees(
     scored_nodes = Node[]
     if !isempty(filtered_pairs)
         # 根据 ratio_score 降序排序
-        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.5*randn()), rev = true)
+        sorted_pairs = sort(filtered_pairs, by = x -> x.second * (1.0 + 0.1*randn()), rev = true)
         scored_nodes = [p.first for p in sorted_pairs]
     end
 

@@ -218,7 +218,8 @@ class Pow2_op:
         self.is_directed = True
 
     def get_expr(self, sub_expr):
-        return "(({})**2)".format(sub_expr)
+        # return "(({})**2)".format(sub_expr)
+        return "(({})*({}))".format(sub_expr)
 
     def transform_inputs(self, x):
         return x**2
@@ -231,7 +232,8 @@ class Pow3_op:
         self.is_directed = True
 
     def get_expr(self, sub_expr):
-        return "(({})**3)".format(sub_expr)
+        # return "(({})**3)".format(sub_expr)
+        return "(({})*({})*({}))".format(sub_expr)
 
     def transform_inputs(self, x):
         return x**3
